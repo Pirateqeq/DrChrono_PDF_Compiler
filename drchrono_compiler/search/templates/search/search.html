@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Patient Search{% endblock %}
+{% block content %}
+<div class="container mt-5">
+    <h2>Search for a Patient</h2>
+    <p>Enter at least the last name to find patient.</p>
+
+    <form method="post" class="mt-4">
+        {% csrf_token %}
+        <div class="row g-3">
+            <div class="col-md-6">
+                {{ form.first_name.label_tag }}
+                {{ form.first_name }}
+                <small class="form-text text-muted">At least one field required</small>
+            </div>
+            <div class="col-md-6">
+                {{ form.last_name.label_tag }}
+                {{ form.last_name }}
+            </div>
+        </div>
+        <div class="row g-3 mt-2">
+            <div class="col-md-4">
+                {{ form.date_of_birth.label_tag }}
+                {{ form.date_of_birth }}
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary mt-4">Search Patients</button>
+    </form>
+</div>
+{% endblock %}

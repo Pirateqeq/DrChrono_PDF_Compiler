@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Patient Search Results{% endblock %}
+{% block content %}
+<div class="container mt-5">
+    <h2>Search Results</h2>
+    {% csrf_token %}
+    {% if result_count > 0 %}
+        <p class="lead">
+            Found <strong>{{ result_count }}</strong> patient{{ result_count|pluralize }} matching:
+            <em>
+                {% if filters.last_name %}"{{ filters.last_name|title }}"{% endif %}
+                {% if filters.first_name %} ({{ filters.first_name|title }}){% endif %}
+                {% if filters.date_of_birth %} — DOB: {{ filters.date_of_birth }}{% endif %}
+            </em>
+        </p>
+
+        {% if result_count > 30 %}
+            <div class="alert alert-warning">
+                Many results returned. Consider adding more details for better accuracy.
+            </div>
+        {% endif %}
+
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>DOB</th>
+                        <th>Chart ID</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for patient in patients %}
+                    <tr>
+                        <td>
+                            {{ patient.last_name|title }}, {{ patient.first_name|title }}
+                        </td>
+                        <td>{{ patient.date_of_birth|default:"—" }}</td>
+                        <td>{{ patient.chart_id|default:"—" }}</td>
+                        <td>
+                            <a href="{% url 'appts_app:historical_list' patient_id=patient.id patient_name=patient.first_name|add:' '|add:patient.last_name %}" 
+                                class="btn btn-sm btn-success">
+                                Select & View Appointments
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="5" class="text-center">No patients found.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+    {% else %}
+        <div class="alert alert-info">
+            No search results available in this session.
+            <a href="{% url 'search_app:search' %}" class="alert-link">Start a new search</a>.
+        </div>
+    {% endif %}
+
+    <div class="mt-4">
+        <a href="{% url 'search_app:search' %}" class="btn btn-secondary">
+            ← New Search
+        </a>
+    </div>
+</div>
+{% endblock %}
