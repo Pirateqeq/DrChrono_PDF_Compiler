@@ -30,6 +30,17 @@ DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = ['drchrono-pdf-compiler.onrender.com']
 
+# HTTPS / cookie hardening — Render terminates TLS and forwards X-Forwarded-Proto
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+
+SECURE_HSTS_SECONDS = 300
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+# SECURE_HSTS_PRELOAD = True
+
+
 CSRF_TRUSTED_ORIGINS = [
     'https://drchrono-pdf-compiler.onrender.com',
 ]
