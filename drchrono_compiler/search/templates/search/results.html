@@ -1,68 +1,43 @@
 {% extends "base.html" %}
-{% block title %}Patient Search Results{% endblock %}
+{% block title %}Search Results{% endblock %}
 {% block content %}
-<div class="container mt-5">
-    <h2>Search Results</h2>
-    {% csrf_token %}
+    <h1 style="font-size: 32px; font-weight: 700; color: #134e4a; margin: 0 0 8px 0;">Search Results</h1>
+
     {% if result_count > 0 %}
-        <p class="lead">
-            Found <strong>{{ result_count }}</strong> patient{{ result_count|pluralize }} matching:
-            <em>
-                {% if filters.last_name %}"{{ filters.last_name|title }}"{% endif %}
-                {% if filters.first_name %} ({{ filters.first_name|title }}){% endif %}
-                {% if filters.date_of_birth %} — DOB: {{ filters.date_of_birth }}{% endif %}
-            </em>
-        </p>
+      <p style="font-size: 16px; color: #78716c; margin: 0 0 32px 0;">
+        Found <strong style="color: #134e4a;">{{ result_count }}</strong> patient{{ result_count|pluralize }} matching:
+        <em>
+          {% if filters.last_name %}"{{ filters.last_name|title }}"{% endif %}
+          {% if filters.first_name %} ({{ filters.first_name|title }}){% endif %}
+          {% if filters.date_of_birth %} — DOB: {{ filters.date_of_birth }}{% endif %}
+        </em>
+      </p>
 
-        {% if result_count > 30 %}
-            <div class="alert alert-warning">
-                Many results returned. Consider adding more details for better accuracy.
-            </div>
-        {% endif %}
-
-        <div class="table-responsive">
-            <table class="table table-striped table-hover">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>DOB</th>
-                        <th>Chart ID</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for patient in patients %}
-                    <tr>
-                        <td>
-                            {{ patient.last_name|title }}, {{ patient.first_name|title }}
-                        </td>
-                        <td>{{ patient.date_of_birth|default:"—" }}</td>
-                        <td>{{ patient.chart_id|default:"—" }}</td>
-                        <td>
-                            <a href="{% url 'appts_app:historical_list' patient_id=patient.id patient_name=patient.first_name|add:' '|add:patient.last_name %}" 
-                                class="btn btn-sm btn-success">
-                                Select & View Appointments
-                            </a>
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr><td colspan="5" class="text-center">No patients found.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+      {% if result_count > 30 %}
+        <div class="alert alert-warning" style="max-width: 760px;">
+          Many results returned. Consider adding more details for better accuracy.
         </div>
+      {% endif %}
+
+      <div style="max-width: 760px; display: flex; flex-direction: column; gap: 14px;">
+        {% for patient in patients %}
+        <div style="display: flex; align-items: center; gap: 16px; padding: 18px 20px; border: 1px solid #eee3d3; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04);">
+          <div style="width: 44px; height: 44px; border-radius: 50%; background: #ccfbf1; color: #0f766e; font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">{{ patient.first_name|first|upper }}{{ patient.last_name|first|upper }}</div>
+          <div style="flex: 1;">
+            <div style="font-size: 16px; font-weight: 600; color: #134e4a;">{{ patient.last_name|title }}, {{ patient.first_name|title }}</div>
+            <div style="font-size: 13px; color: #78716c; margin-top: 2px;">DOB {{ patient.date_of_birth|default:"—" }} · {{ patient.chart_id|default:"—" }}</div>
+          </div>
+          <a href="{% url 'appts_app:historical_list' patient_id=patient.id patient_name=patient.first_name|add:' '|add:patient.last_name %}" style="background: #0d9488; color: #fff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 22px; border-radius: 24px;">Select &amp; View Appointments</a>
+        </div>
+        {% endfor %}
+      </div>
 
     {% else %}
-        <div class="alert alert-info">
-            No search results available in this session.
-            <a href="{% url 'search_app:search' %}" class="alert-link">Start a new search</a>.
-        </div>
+      <div class="alert alert-info" style="max-width: 760px;">
+        No search results available in this session.
+        <a href="{% url 'search_app:search' %}" style="color: #075985; font-weight: 600;">Start a new search</a>.
+      </div>
     {% endif %}
 
-    <div class="mt-4">
-        <a href="{% url 'search_app:search' %}" class="btn btn-secondary">
-            ← New Search
-        </a>
-    </div>
-</div>
+    <a href="{% url 'search_app:search' %}" style="display: inline-flex; align-items: center; gap: 6px; margin-top: 28px; background: #78716c; color: #fff; font-size: 15px; font-weight: 500; text-decoration: none; padding: 10px 20px; border-radius: 24px;">← New Search</a>
 {% endblock %}
