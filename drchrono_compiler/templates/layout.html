@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}DrChrono PDF Compiler{% endblock %}</title>
+<style>
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+  a { color: #0d9488; }
+  a:hover { color: #0f766e; }
+  /* Bridges Django form widgets (class="form-control") to the new visual style */
+  .form-control {
+    width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 15px;
+    border: 1px solid #e7e5e4; border-radius: 24px; color: #134e4a; outline: none;
+  }
+  .alert { padding: 14px 20px; border-radius: 12px; margin-bottom: 12px; font-size: 14px; }
+  .alert-success { background: #ccfbf1; color: #0f766e; }
+  .alert-error, .alert-danger { background: #fee2e2; color: #b91c1c; }
+  .alert-warning { background: #fef3c7; color: #92400e; }
+  .alert-info { background: #e0f2fe; color: #075985; }
+</style>
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+<div style="min-height: 100vh; background: #fdfaf6; display: flex; flex-direction: column;">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 18px 32px; background: #fdfaf6; border-bottom: 1px solid #eee3d3;">
+    <div style="display: flex; align-items: center; gap: 28px;">
+      <span style="font-size: 20px; font-weight: 700; color: #134e4a;">DrChrono PDF Compiler</span>
+      <a href="{% url 'search_app:search' %}" style="color: #78716c; text-decoration: none; font-size: 15px;">Search Patients</a>
+    </div>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      {% if user.is_authenticated %}
+      <div style="display: flex; align-items: center; gap: 8px; color: #0d9488; font-size: 15px; font-weight: 500;">
+        <span style="width: 18px; height: 18px; border-radius: 50%; background: #0d9488; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px;">✓</span>
+        Connected
+      </div>
+      {% else %}
+      <div style="color: #a8a29e; font-size: 15px;">Not connected</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div style="flex: 1; padding: 56px 32px 32px 32px;">
+    {% if messages %}
+      <div style="max-width: 800px; margin-bottom: 24px;">
+        {% for message in messages %}
+          <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </div>
+
+  <div style="text-align: center; padding: 20px; border-top: 1px solid #eee3d3; color: #a8a29e; font-size: 13px;">
+    © {% now "Y" %} DrChrono PDF Compiler • Built with Django •
+  </div>
+</div>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

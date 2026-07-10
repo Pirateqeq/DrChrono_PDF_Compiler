@@ -19,6 +19,6 @@ Part of the [DrChrono PDF Compiler](../../README.md), which connects to DrChrono
 
 - `wsgi.py` is what gunicorn actually runs in production. `asgi.py` is unused leftover from `startproject`.
 
-## templates/base.html (project root)
+## templates/layout.html (project root)
 
-The shared layout every app's templates extend via `{% extends "base.html" %}` — navbar, alert/message rendering, and footer. It lives here at the project root's `templates/` folder (rather than inside any one app) because `TEMPLATES['DIRS']` in `settings.py` points at this location.
+The shared layout every app's templates extend via `{% extends "layout.html" %}` — navbar, alert/message rendering, and footer. It lives here at the project root's `templates/` folder (rather than inside any one app) because `TEMPLATES['DIRS']` in `settings.py` points at this location.
