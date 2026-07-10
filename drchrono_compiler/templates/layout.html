@@ -45,7 +45,10 @@
     {% if messages %}
       <div style="max-width: 800px; margin-bottom: 24px;">
         {% for message in messages %}
-          <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+          <div class="alert alert-{{ message.tags }}" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+            <span>{{ message }}</span>
+            <button type="button" onclick="this.closest('.alert').remove()" style="background: none; border: none; font-size: 18px; line-height: 1; cursor: pointer; color: inherit; opacity: 0.6; padding: 0;">&times;</button>
+          </div>
         {% endfor %}
       </div>
     {% endif %}
