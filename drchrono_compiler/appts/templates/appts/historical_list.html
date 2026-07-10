@@ -1,83 +1,36 @@
 {% extends "base.html" %}
-{% block title %}Historical Appointments{% endblock %}
+{% block title %}Past Appointments{% endblock %}
 {% block content %}
-<div class="container mt-5">
-    <h2>Historical Appointments for {{ patient_name }}</h2>
+    <h1 style="font-size: 32px; font-weight: 700; color: #134e4a; margin: 0 0 8px 0;">Past Appointments for {{ patient_name }}</h1>
 
     {% if appointments %}
-        <p class="lead mb-4">
-            Showing {{ appointments|length }} past appointment{{ appointments|length|pluralize }}.
-        </p>
+    <p style="font-size: 16px; color: #78716c; margin: 0 0 32px 0;">Showing <strong style="color: #134e4a;">{{ appointments|length }}</strong> past appointment{{ appointments|length|pluralize }}.</p>
 
-        <form method="post" action="{% url 'pdf_app:generate_selected' patient_id=patient_id %}?patient_name={{ patient_name }}">
-            {% csrf_token %}
-            <input type="hidden" name="patient_name" value="{{ patient_name }}">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Reason</th>
-                            <th>Status</th>
-                            <th>Select</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for appt in appointments %}
-                        <tr>
-                            <td>
-                                {{ appt.scheduled_time | date:"M d, Y h:i A"}}
-                            </td>
-                            <td>
-                                {{ appt.reason|default:"No reason provided" }}
-                            </td>
-                            <td>
-                                <span class="badge 
-                                    {% if appt.status == 'Confirmed' or appt.status == 'MA Note Complete' %}bg-success
-                                    {% elif appt.status == 'Checked In' %}bg-info
-                                    {% elif appt.status == 'No Show' or appt.status == 'Cancelled' %}bg-danger
-                                    {% else %}bg-secondary{% endif %}">
-                                    {{ appt.status|default:"Unknown" }}
-                                </span>
-                            </td>                            
-                            <td>
-                                <input type="checkbox" 
-                                    name="selected_appts" 
-                                    value="{{ appt.id }}"
-                                    class="form-check-input"
-                                    checked>
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="5" class="text-center py-4">
-                                No historical appointments found for this patient.
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+    <form method="post" action="{% url 'pdf_app:generate_selected' patient_id=patient_id %}?patient_name={{ patient_name }}">
+      {% csrf_token %}
+      <input type="hidden" name="patient_name" value="{{ patient_name }}">
+      <div style="max-width: 800px; display: flex; flex-direction: column; gap: 12px;">
+        {% for appt in appointments %}
+        <div style="display: flex; align-items: center; gap: 16px; padding: 16px 20px; border: 1px solid #eee3d3; border-radius: 12px; background: #fff;">
+          <div style="flex: 1;">
+            <div style="font-size: 15px; font-weight: 600; color: #134e4a;">{{ appt.scheduled_time|date:"M d, Y h:i A" }}</div>
+            <div style="font-size: 13px; color: #78716c; margin-top: 2px;">{{ appt.reason|default:"No reason provided" }} · {{ appt.status|default:"Unknown" }}</div>
+          </div>
+          <input type="checkbox" name="selected_appts" value="{{ appt.id }}" checked style="width: 20px; height: 20px; accent-color: #0d9488; cursor: pointer;">
+        </div>
+        {% endfor %}
+      </div>
 
-            {% if appointments %}
-                <div class="mt-4 text-end">
-                    <button type="submit" class="btn btn-primary">
-                        Generate PDF Report for Selected
-                    </button>
-                </div>
-            {% endif %}
-        </form>
+      <div style="display: flex; justify-content: flex-end; max-width: 800px; margin-top: 24px;">
+        <button type="submit" style="background: #0d9488; color: #fff; font-size: 15px; font-weight: 600; border: none; padding: 12px 28px; border-radius: 24px; cursor: pointer;">Generate PDF Report for Selected</button>
+      </div>
+    </form>
 
     {% else %}
-        <div class="alert alert-info">
-            No past appointments found for this patient.
-        </div>
+    <div class="alert alert-info" style="max-width: 800px; margin: 0 0 32px 0;">
+      No historical appointments found for this patient.
+    </div>
     {% endif %}
 
-    <div class="mt-4">
-        <a href="{% url 'search_app:search' %}" class="btn btn-secondary">
-            ← Back to Patient Search
-        </a>
-    </div>
-</div>
+    <a href="{% url 'search_app:search' %}" style="display: inline-flex; align-items: center; gap: 6px; margin-top: 40px; background: #78716c; color: #fff; font-size: 15px; font-weight: 500; text-decoration: none; padding: 10px 20px; border-radius: 24px;">← Back to Patient Search</a>
 {% endblock %}
