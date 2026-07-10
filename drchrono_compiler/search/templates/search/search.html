@@ -1,30 +1,32 @@
 {% extends "base.html" %}
-{% block title %}Patient Search{% endblock %}
+{% block title %}Search for a Patient{% endblock %}
 {% block content %}
-<div class="container mt-5">
-    <h2>Search for a Patient</h2>
-    <p>Enter at least the last name to find patient.</p>
+    <h1 style="font-size: 32px; font-weight: 700; color: #134e4a; margin: 0 0 8px 0;">Search for a Patient</h1>
+    <p style="font-size: 16px; color: #78716c; margin: 0 0 32px 0;">Enter at least the last name to find patient.</p>
 
-    <form method="post" class="mt-4">
-        {% csrf_token %}
-        <div class="row g-3">
-            <div class="col-md-6">
-                {{ form.first_name.label_tag }}
-                {{ form.first_name }}
-                <small class="form-text text-muted">At least one field required</small>
-            </div>
-            <div class="col-md-6">
-                {{ form.last_name.label_tag }}
-                {{ form.last_name }}
-            </div>
+    <form method="post">
+      {% csrf_token %}
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px; max-width: 1000px;">
+        <div>
+          <label for="{{ form.first_name.id_for_label }}" style="display: block; font-size: 15px; font-weight: 500; color: #134e4a; margin-bottom: 8px;">First Name:</label>
+          {{ form.first_name }}
+          <div style="font-size: 13px; color: #a8a29e; margin-top: 6px;">At least one field required</div>
+          {{ form.first_name.errors }}
         </div>
-        <div class="row g-3 mt-2">
-            <div class="col-md-4">
-                {{ form.date_of_birth.label_tag }}
-                {{ form.date_of_birth }}
-            </div>
+        <div>
+          <label for="{{ form.last_name.id_for_label }}" style="display: block; font-size: 15px; font-weight: 500; color: #134e4a; margin-bottom: 8px;">Last Name:</label>
+          {{ form.last_name }}
+          {{ form.last_name.errors }}
         </div>
-        <button type="submit" class="btn btn-primary mt-4">Search Patients</button>
+      </div>
+
+      <div style="max-width: 468px; margin-top: 24px;">
+        <label for="{{ form.date_of_birth.id_for_label }}" style="display: block; font-size: 15px; font-weight: 500; color: #134e4a; margin-bottom: 8px;">Date of Birth:</label>
+        {{ form.date_of_birth }}
+        {{ form.date_of_birth.errors }}
+      </div>
+      {{ form.non_field_errors }}
+
+      <button type="submit" style="display: inline-block; margin-top: 28px; background: #0d9488; color: #fff; font-size: 15px; font-weight: 600; border: none; padding: 12px 28px; border-radius: 24px; cursor: pointer;">Search Patients</button>
     </form>
-</div>
 {% endblock %}
