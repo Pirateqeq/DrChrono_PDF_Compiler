@@ -15,7 +15,7 @@
             <span style="width: 10px; height: 10px; border-radius: 50%; background: #0d9488; flex-shrink: 0;"></span>
             <div style="flex: 1;">
             <div style="font-size: 15px; font-weight: 600; color: #134e4a;">{{ appt.scheduled_time|date:"M d, Y h:i A" }}</div>
-            <div style="font-size: 13px; color: #78716c; margin-top: 2px;">{{ appt.reason|default:"No reason provided" }} · {{ appt.status|default:"Unknown" }}</div>
+            <div style="font-size: 13px; color: #78716c; margin-top: 2px;">{{ appt.reason|default:"No reason provided" }}</div>
         </div>
             <input type="checkbox" name="selected_appts" value="{{ appt.id }}" checked style="width: 20px; height: 20px; accent-color: #0d9488; cursor: pointer;">
         </div>
