@@ -49,10 +49,12 @@ def search_patients(request, search_filters: dict) -> tuple[list[dict], str | No
     except requests.HTTPError as e:
         status = e.response.status_code
         if status == 401:
-            raise DrChronoAuthError("Token issue during patient search")
+            raise DrChronoAuthError("Authentication error during patient search")
         elif status == 403:
-            raise DrChronoAuthError("Insufficient scopes for patient search")
+            raise DrChronoAuthError("Unsufficent permissions for patient search")
+        elif 400 <= status < 500:
+            raise RuntimeError(f"client error")
+        elif 500 <= status < 600:
+            raise RuntimeError(f"server error")
         else:
-            raise ValueError(f'DrChrono returned {status}: {e.response.text}')
-    except requests.RequestException as e:
-        raise ValueError(f"Network error searching patients: {str(e)}")
+            raise RuntimeError(f"unknown")

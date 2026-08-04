@@ -50,12 +50,14 @@ class PatientSearchView(LoginRequiredMixin, FormView):
             messages.success(self.request, f"Found {len(patients)} matching patient(s).")
             return redirect('search_app:results')
         
+        #Error 401 and 403 handling
         except DrChronoAuthError as e:
-            messages.error(self.request, f"Authentication issue: {str(e)}. Please try again.")
+            messages.error(self.request, f"Authentication issue: {e.message}. Please try again.")
             return self.form_invalid(form)
         
-        except ValueError as e:
-            messages.error(self.request, "An error occurred while searching patients. Please try again or contact support.")
+        #Error 4xx and 5xx handling
+        except RuntimeError as e:
+            messages.error(self.request, f"A {str(e)} occurred while searching patients. ")
             return self.form_invalid(form)
         
         except Exception as e:

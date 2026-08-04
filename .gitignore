@@ -1,0 +1,25 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Django artifacts
+*.pyc
+__pycache__/
+db.sqlite3
+*.sqlite3
+staticfiles/
+media/
+
+# IDE / editor
+.vscode/
+.VSCodeCounter/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+TEST_PLAN.md
+Template_Integration_Plan.md
+*.log
