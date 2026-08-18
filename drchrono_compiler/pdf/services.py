@@ -468,7 +468,6 @@ def generate_hcfa_bill(request, data: dict) -> BytesIO:
     for charge in data['charges']:
         total_charge += Decimal(str(charge))
     total_charge = str(total_charge)
-    print(total_charge)
 
     if '.' in total_charge:
         total_charge = total_charge.split('.')
@@ -477,8 +476,6 @@ def generate_hcfa_bill(request, data: dict) -> BytesIO:
     else:
         c.drawString(390, height - 698, total_charge)
         c.drawString(443, height - 698, "00")
-
-    c.drawString(390, height - 698, total_charge)
 
     # Box 31 Provider Signature
     if PRINT_ERRORS: print("DRAWING BOX 31")
