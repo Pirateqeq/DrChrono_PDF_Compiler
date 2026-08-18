@@ -467,11 +467,9 @@ def generate_hcfa_bill(request, data: dict) -> BytesIO:
     total_charge = 0
     for charge in data['charges']:
         total_charge += Decimal(str(charge))
-    total_charge = str(total_charge)
-    total_charge = total_charge.split('.')
+    total_charge = str(total_charge.quantize(Decimal("0.01")))
 
-    c.drawString(390, height - 698, total_charge[0])
-    c.drawString(443, height - 698, total_charge[1] if len(total_charge[1]) != 1 else f'{total_charge[1]}0')
+    c.drawString(390, height - 698, total_charge)
 
     # Box 31 Provider Signature
     if PRINT_ERRORS: print("DRAWING BOX 31")
