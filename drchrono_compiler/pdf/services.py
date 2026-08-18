@@ -467,7 +467,16 @@ def generate_hcfa_bill(request, data: dict) -> BytesIO:
     total_charge = 0
     for charge in data['charges']:
         total_charge += Decimal(str(charge))
-    total_charge = str(total_charge.quantize(Decimal("0.01")))
+    total_charge = str(total_charge)
+    print(total_charge)
+
+    if '.' in total_charge:
+        total_charge = total_charge.split('.')
+        c.drawString(390, height - 698, total_charge[0])
+        c.drawString(443, height - 698, total_charge[1])
+    else:
+        c.drawString(390, height - 698, total_charge)
+        c.drawString(443, height - 698, "00")
 
     c.drawString(390, height - 698, total_charge)
 
