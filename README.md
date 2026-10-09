@@ -4,6 +4,9 @@ A Django 5.2 web application that connects to the DrChrono EHR API via OAuth2 an
 
 **Status:** Internal tool built for one specific medical practice's billing workflow. It processes real patient health information (PHI) and billing data (including SSN/EIN and insurance details). It is not a general-purpose or multi-tenant product — provider identity and billing details are configured for a single practice via environment variables.
 
+<img width="1842" height="995" alt="image" src="https://github.com/user-attachments/assets/c024e34c-0a59-41b8-910e-fe9bf66f51c4" />
+
+
 ---
 
 ## What It Does
@@ -15,7 +18,6 @@ A Django 5.2 web application that connects to the DrChrono EHR API via OAuth2 an
    - A balance report (generated with ReportLab)
    - Clinical note PDFs (downloaded from DrChrono)
    - HCFA-1500 billing forms (ReportLab canvas overlay merged onto a blank HCFA template via pypdf)
-
 ---
 
 ## App Structure
