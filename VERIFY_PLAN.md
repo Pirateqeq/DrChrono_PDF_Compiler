@@ -88,6 +88,60 @@ def get_valid_access_token(request) -> str        # kept so search/appts/pdf wor
    7. `login()`, success message, redirect to search.
 4. **`require_auth`** failure → "Your DrChrono session expired, please sign in again." → `/`.
 
+### Diagrams
+
+Sign-in (OAuth2 authorization-code flow):
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant App as verify app
+    participant DB as Database
+    participant DC as DrChrono
+
+    User->>App: GET /
+    alt Signed in with a usable token
+        App-->>User: Redirect to search
+    else Not signed in
+        App-->>User: Sign-in page (shows any messages)
+    end
+    User->>App: Click "Sign in with DrChrono" (GET /authorize/)
+    App->>App: Create random state, save in session
+    App-->>User: Redirect to DrChrono /o/authorize/
+    User->>DC: Approve or Cancel
+    DC-->>User: Redirect to /oauth/callback with code and state
+    User->>App: GET /oauth/callback
+    App->>App: Pop saved state from session
+    alt Cancelled, or state missing / mismatched
+        App-->>User: Back to / with a message
+    else Valid
+        App->>DC: POST /o/token/ (grant_type=authorization_code)
+        DC-->>App: access_token, refresh_token, expires_in
+        App->>DC: GET /api/users/current
+        DC-->>App: username
+        App->>DB: get_or_create User, save_token
+        App-->>User: Signed in, redirect to search
+    end
+```
+
+Every protected page (`require_auth` → `get_access_token`):
+
+```mermaid
+flowchart TD
+    A[Request to a protected page] --> B{Signed in?}
+    B -- No --> X[Redirect to / with message]
+    B -- Yes --> C{Credential exists?}
+    C -- No --> X
+    C -- Yes --> D{More than 5 min left on token?}
+    D -- Yes --> OK[Set request.drchrono_token and run the page]
+    D -- No --> E[Lock credential row]
+    E --> F{Refreshed by another request meanwhile?}
+    F -- Yes --> OK
+    F -- No --> G[POST /o/token/ with refresh_token]
+    G -- Success --> H[save_token] --> OK
+    G -- Failure --> X
+```
+
 ### User-visible changes
 
 - `/` is a sign-in page with one button instead of an instant redirect (one extra click).
