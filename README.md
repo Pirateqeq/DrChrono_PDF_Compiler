@@ -1,172 +1,107 @@
 # DrChrono PDF Compiler
 
-A Django 5.2 web application that connects to the DrChrono EHR API via OAuth2 and compiles composite PDF billing packets for patient appointments. For each selected appointment, it bundles a patient balance statement, the clinical note, and a completed HCFA-1500 billing form into a single downloadable PDF.
+Django 5.2 app that signs in to DrChrono (EHR) via OAuth2 and builds a single billing PDF for a patient: a balance report, plus the clinical note and a filled HCFA-1500 claim form for each selected appointment.
 
-**Status:** Internal tool built for one specific medical practice's billing workflow. It processes real patient health information (PHI) and billing data (including SSN/EIN and insurance details). It is not a general-purpose or multi-tenant product — provider identity and billing details are configured for a single practice via environment variables.
+Internal tool for one practice. It handles real PHI and billing data; practice details come from environment variables.
 
 <img width="1842" height="995" alt="image" src="https://github.com/user-attachments/assets/c024e34c-0a59-41b8-910e-fe9bf66f51c4" />
 
+## How it works
 
----
+1. **Connect** — log in through DrChrono. Tokens are stored per user and refreshed when expired.
+2. **Search** — find a patient by first name, last name, and/or date of birth.
+3. **Select** — pick from the patient's past appointments (last 3 years, with a clinical note PDF).
+4. **Generate** — download one merged PDF:
+   - balance report for the patient
+   - per selected appointment (oldest first): clinical note PDF, then HCFA-1500 form
 
-## What It Does
+## Project layout
 
-1. **Connect** — The user authenticates via DrChrono's OAuth2 flow. Tokens are stored per-user in the database and refreshed automatically when expired.
-2. **Search** — The user searches for a patient by first name, last name, or date of birth. Results come directly from the DrChrono API.
-3. **Select Appointments** — The app fetches the patient's historical appointments (past 3 years, with clinical note PDFs available) and displays them in a table with checkboxes.
-4. **Generate PDF** — The user selects one or more appointments and submits. The app builds a composite PDF containing:
-   - A balance report (generated with ReportLab)
-   - Clinical note PDFs (downloaded from DrChrono)
-   - HCFA-1500 billing forms (ReportLab canvas overlay merged onto a blank HCFA template via pypdf)
----
+All code lives in `drchrono_compiler/`. Each app has a `DOC.md` with details.
 
-## App Structure
+| Path | Purpose |
+|---|---|
+| [`drchrono_compiler/`](drchrono_compiler/drchrono_compiler/DOC.md) | Settings, root URLs, WSGI, shared `templates/layout.html` |
+| [`verify/`](drchrono_compiler/verify/DOC.md) | OAuth2 login, token storage/refresh, `require_auth` decorator |
+| [`search/`](drchrono_compiler/search/DOC.md) | Patient search form and results |
+| [`appts/`](drchrono_compiler/appts/DOC.md) | Appointment list with checkboxes |
+| [`pdf/`](drchrono_compiler/pdf/DOC.md) | Balance report, clinical notes, HCFA-1500, final merge |
+| [`core/`](drchrono_compiler/core/DOC.md) | Shared DrChrono API helpers |
 
-```
-drchrono_compiler/
-├── verify/        # OAuth2 flow, token storage, auth decorator
-├── search/        # Patient search form and results view
-├── appts/         # Historical appointment list with filtering
-├── pdf/           # PDF generation (balance report, clinical notes, HCFA-1500)
-├── core/          # Shared DrChrono API helpers (appointment, line item, patient)
-└── drchrono_compiler/  # Project settings, root URL conf
-```
+## Local setup
 
-Each folder above has its own `DOC.md` with a closer, file-by-file and function-by-function look at how it works — start with [`drchrono_compiler/drchrono_compiler/DOC.md`](drchrono_compiler/drchrono_compiler/DOC.md) for settings/routing, then follow the links from there into each app.
-
-### App Responsibilities
-
-**[`verify`](drchrono_compiler/verify/DOC.md)**
-- `DrChronoCredential` model — stores access/refresh tokens per user with expiry tracking
-- `require_auth` decorator — validates token before any protected view runs, sets `request.drchrono_token`
-- `get_valid_access_token` — refreshes token automatically if expired
-- Views: `connect_drchrono` (starts OAuth), `oauth_callback` (handles redirect, creates/updates user)
-
-**[`search`](drchrono_compiler/search/DOC.md)**
-- `PatientSearchForm` — requires at least one of: first name, last name, or date of birth
-- `search_patients` — calls `/api/patients_summary` with filters, returns paginated results
-- Session-based result storage between search and results views
-
-**[`appts`](drchrono_compiler/appts/DOC.md)**
-- `HistoricalAppointmentsView` — fetches appointments for a patient and filters to: past dates only, non-cancelled/rescheduled/no-show statuses, and appointments that have a clinical note PDF
-
-**[`pdf`](drchrono_compiler/pdf/DOC.md)**
-- `generate_balance_report` — builds a ReportLab PDF table of all billable line items
-- `generate_clinical_notes` — downloads the clinical note PDF from DrChrono
-- `fetch_hcfa_data` — assembles and validates the data dict for the HCFA form
-- `generate_hcfa_bill` — draws text/checkmarks onto a ReportLab canvas, merges it onto `HCFA.pdf` template
-- `GenerateSelectedPDFView` — orchestrates all of the above and returns a single merged PDF as a file download
-
-**[`core`](drchrono_compiler/core/DOC.md)**
-- `fetch_appointment`, `fetch_lineitem`, `fetch_patient` — thin wrappers around DrChrono API endpoints
-
----
-
-## Local Development Setup
-
-### Prerequisites
-
-- Python 3.11+
-- PostgreSQL (or use SQLite for local dev by overriding `DATABASE_URL`)
-
-### Installation
+Requires Python 3.11+. Run everything from `drchrono_compiler/` (the HCFA template is loaded by relative path).
 
 ```bash
-# Clone the repo
-git clone <repo-url>
 cd drchrono_compiler
+```
 
-# Create and activate a virtual environment
+```bash
 python -m venv .venv
-.venv\Scripts\activate       # Windows
-# source .venv/bin/activate  # macOS/Linux
+```
 
-# Install dependencies
+```bash
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+```
+
+```bash
 pip install -r requirements.txt
+```
 
-# Apply migrations
+```bash
 python manage.py migrate
+```
 
-# Run the dev server
+```bash
 python manage.py runserver
 ```
 
-### Environment Variables
+For local runs:
+- Add `localhost` / `127.0.0.1` to `ALLOWED_HOSTS` in `settings.py` (it only lists the Render domain).
+- Use `DATABASE_URL=sqlite:///db.sqlite3` if you don't have PostgreSQL.
+- Set `DRCHRONO_REDIRECT_URI=http://localhost:8000/oauth/callback` (and register it in DrChrono). OAuth over plain HTTP also needs `OAUTHLIB_INSECURE_TRANSPORT=1`.
 
-The app reads all configuration from environment variables. Set these in your shell, your process manager, or the Render dashboard — there is no `.env` loader wired in, so a `.env` file on its own will not populate them.
+## Environment variables
 
-| Variable | Description |
+Read with `os.getenv`; there is no `.env` loader.
+
+| Variable | Used for |
 |---|---|
 | `SECRET_KEY` | Django secret key |
-| `DEBUG` | Set to `True` for local dev, `False` for production |
-| `DATABASE_URL` | PostgreSQL connection string |
-| `DRCHRONO_CLIENT_ID` | DrChrono OAuth app client ID |
-| `DRCHRONO_CLIENT_SECRET` | DrChrono OAuth app client secret |
-| `DRCHRONO_REDIRECT_URI` | OAuth callback URL (must match DrChrono app settings) |
-| `DRCHRONO_SCOPES` | Space-separated DrChrono API scopes |
-| `PROVIDER_NAME` | Practice name shown on the balance report |
-| `PROVIDER_NPI` | Provider NPI printed on the HCFA form |
-| `FEDERAL_TAX_ID` | Federal tax ID printed on the HCFA form |
-| `PROVIDER_ACCOUNT_NUMBER` | Practice account number printed on the HCFA form |
-| `PHYSICIAN_SIGNATURE` | Physician signature text printed on the HCFA form |
-| `PROVIDER_OFFICE_NAME` | Practice office name printed on the HCFA form |
-| `PROVIDER_ADDRESS` | Practice address printed on the HCFA form |
-| `PROVIDER_CITY_STATE` | Practice city/state printed on the HCFA form |
-| `PROVIDER_PHONE` | Practice phone number printed on the HCFA form |
-| `PROVIDER_INFO` | Additional provider info printed on the HCFA form |
+| `DEBUG` | `True` for local dev; anything else is off |
+| `DATABASE_URL` | Database connection string |
+| `DRCHRONO_CLIENT_ID` / `DRCHRONO_CLIENT_SECRET` | DrChrono OAuth app credentials |
+| `DRCHRONO_REDIRECT_URI` | OAuth callback URL (`<host>/oauth/callback`) |
+| `DRCHRONO_SCOPES` | Space-separated OAuth scopes |
+| `PROVIDER_NAME` | Balance report header |
+| `PROVIDER_NPI` | HCFA boxes 24J and 33a |
+| `FEDERAL_TAX_ID` | HCFA box 25 |
+| `PROVIDER_ACCOUNT_NUMBER` | HCFA box 26 |
+| `PHYSICIAN_SIGNATURE` | HCFA box 31 |
+| `PROVIDER_OFFICE_NAME` | HCFA box 32 |
+| `PROVIDER_ADDRESS` / `PROVIDER_CITY_STATE` | HCFA boxes 32 and 33 |
+| `PROVIDER_PHONE` | HCFA box 33; format `555 123-4567` (area code, one space, number) |
+| `PROVIDER_INFO` | HCFA box 33 name line |
 
----
-
-## Security
-
-- **Authentication** — Users authenticate through DrChrono's OAuth2 flow. Access and refresh tokens are stored per Django user in the `DrChronoCredential` model and refreshed automatically before they expire.
-- **Secrets** — All credentials and provider-identifying information are supplied via environment variables and are never committed to source control.
-- **Patient data** — This application handles real protected health information (PHI) and billing data, including SSN/EIN and insurance details, for one specific medical practice. It is not built or intended for multi-tenant or public use.
-- **Transport** — The production deployment runs behind HTTPS on Render.
-
----
+Every HCFA variable above is required — PDF generation fails if any is missing. `PROVIDER_NAME` falls back to `Unknown Provider`.
 
 ## Deployment (Render)
 
-The app is deployed on Render as a Web Service.
+- **Build:** `./build.sh` (installs requirements, `collectstatic`, `migrate`)
+- **Start:** `gunicorn drchrono_compiler.wsgi:application`
+- **Root directory:** `drchrono_compiler/`
 
-**Build command:**
-```bash
-pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate
-```
+Render terminates TLS; settings force HTTPS, secure cookies, and HSTS when `DEBUG` is off. Static files are served by WhiteNoise.
 
-**Start command:**
-```bash
-gunicorn drchrono_compiler.wsgi:application
-```
+## DrChrono API endpoints
 
-Static files are served by WhiteNoise. The `STATICFILES_STORAGE` is set to `whitenoise.storage.CompressedManifestStaticFilesStorage`.
-
----
-
-## Key Dependencies
-
-| Package | Purpose |
+| Endpoint | Used by |
 |---|---|
-| Django 5.2 | Web framework |
-| requests-oauthlib | OAuth2 session management |
-| pypdf | PDF merging (HCFA overlay onto template) |
-| reportlab | PDF generation (balance report, HCFA canvas) |
-| whitenoise | Static file serving in production |
-| dj-database-url | PostgreSQL URL parsing |
-| psycopg2-binary | PostgreSQL adapter |
-| gunicorn | WSGI server |
-
----
-
-## DrChrono API Endpoints Used
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/users/current` | Fetch authenticated user info after OAuth |
-| `GET /api/patients_summary` | Search patients by name / DOB |
-| `GET /api/appointments` | Fetch appointment history for a patient |
-| `GET /api/appointments/{id}` | Fetch single appointment detail |
-| `GET /api/line_items?appointment={id}` | Fetch billing line items for an appointment |
-| `GET /api/patients/{id}` | Fetch patient demographic data |
-| `POST /o/token/` | Exchange auth code / refresh token |
+| `POST /o/token/` | Token exchange and refresh (`verify`) |
+| `GET /api/users/current` | Identify the user after login (`verify`) |
+| `GET /api/patients_summary` | Patient search (`search`) |
+| `GET /api/appointments` | Appointment history (`core`) |
+| `GET /api/appointments/{id}` | Single appointment (`core`) |
+| `GET /api/line_items?appointment={id}` | Billing line items (`core`) |
+| `GET /api/patients/{id}` | Patient demographics (`core`) |
+| Clinical note `pdf` URL | Clinical note download (`pdf`) |

@@ -1,28 +1,40 @@
 # pdf/
 
-Part of the [DrChrono PDF Compiler](../../README.md), which connects to DrChrono (a cloud-based EHR / practice-management platform) to generate billing PDFs. This doc covers the `pdf/` app only.
-
-Where the actual deliverable gets built. Turns a patient + a set of selected appointments (chosen on [`appts`](../appts/DOC.md)'s list) into one merged PDF: a balance report, each appointment's clinical note, and a filled HCFA-1500 form (the standard paper claim form used to bill insurance for a visit).
-
-## services.py
-
-- **`generate_balance_report(patient_id, token, provider_name=None)`** — Builds the ReportLab balance report. Fetches the patient, pulls their appointments from the last 3 years (excluding cancelled/rescheduled/no-show, and only ones with a clinical note PDF), then fetches line items per appointment, drops any with a zero balance, sums the total, and renders it all as a table (date, debit, claim type, description). Runs once per PDF, not once per selected appointment. Uses [`core`](../core/DOC.md)'s `fetch_patient` and `fetch_lineitem` for the underlying API calls.
-- **`generate_clinical_notes(request, appt)`** — Downloads the clinical note PDF DrChrono already generated for one appointment. If there's no note URL or the download fails, it warns the user and returns an empty buffer rather than breaking the whole merge.
-- **`fetch_hcfa_data(patient_json, appt_json, line_item_json)`** — Assembles the full data dict needed to fill one HCFA-1500 form: patient demographics, insured info, ICD-10 codes (diagnosis codes), per-line-item service dates/codes/charges, and the practice's own identity fields (NPI, tax ID, address, etc.) pulled from environment variables. Normalizes the patient's phone number into a fixed grouping. Before returning, it checks every required scalar field and raises with a list of exactly what's missing — so an incomplete patient record fails loudly here instead of producing a bill with blank boxes.
-- **`generate_hcfa_bill(request, data)`** — Draws checkmarks and text onto a ReportLab canvas at fixed pixel coordinates, then merges that overlay onto the blank `HCFA.pdf` template with pypdf. Every coordinate (sex/insurance checkboxes, name and address blocks, DOB, ICD-10 codes, per-line service rows, provider signature block) is hand-tuned to this one template's exact layout — it isn't dynamic form-field filling, it's print-registration by pixel position.
+Builds the final merged PDF. Part of the [DrChrono PDF Compiler](../../README.md).
 
 ## views.py
 
-- **`GenerateSelectedPDFView`** — The orchestrator for the "Generate PDF" button, reached from [`appts`](../appts/DOC.md)'s appointment list. Gated by `require_auth`, same as every other protected view — see [`verify`](../verify/DOC.md). Reads the checked appointment IDs, builds one balance report, then for each selected appointment appends its clinical note and a freshly generated HCFA bill — merging everything into a single file with pypdf's `PdfWriter`. Fetches raw appointment/line-item/patient data via [`core`](../core/DOC.md)'s `fetch_appointment`, `fetch_lineitem`, and `fetch_patient`. Returns the result as a download named after the patient. Any failure anywhere in that chain sends the user back to the appointment list with an error message instead of a partial PDF.
+- **`GenerateSelectedPDFView`** (`POST pdf/patient/<id>/generate-selected/`, protected by [`require_auth`](../verify/DOC.md)) — Builds the PDF in this order:
+  1. Balance report
+  2. For each selected appointment, oldest first: clinical note, then HCFA-1500
+
+  Returns it as a download named `Patient_<First>_<Last>_REPORT.pdf`. Any exception redirects back to the [appointment list](../appts/DOC.md) with the error messages.
+
+## services.py
+
+- **`generate_balance_report(patient_id, token, provider_name=None)`** — ReportLab table of every non-zero line item across all of the patient's [valid appointments](../core/DOC.md) (not just the selected ones), newest first, with the total balance. Header uses `PROVIDER_NAME`.
+- **`generate_clinical_notes(request, appt)`** — Downloads the appointment's clinical note PDF. On a missing URL or failed download, adds a warning and returns an empty buffer.
+- **`fetch_hcfa_data(patient_json, appt_json, line_item_json)`** — Builds the HCFA data dict from patient demographics, the appointment's ICD-10 codes, line items (date, CPT code, price), and provider env vars. Raises an `Exception` listing every missing field.
+- **`generate_hcfa_bill(request, data)`** — Draws text and checkmarks at fixed coordinates on a ReportLab canvas and overlays it on `static/HCFA.pdf`.
+
+### Hardcoded HCFA values
+
+| Field | Value |
+|---|---|
+| Insured | Same as patient (self) |
+| Box 10 employment / other accident | No |
+| Box 10 auto accident | Yes |
+| Box 11d another health plan | No |
+| Box 12 / 13 signatures | "Signature on File" |
+| Box 21 ICD indicator | `0` (ICD-10) |
+| Box 24B place of service | `11` (office) |
+| Box 24E diagnosis pointer | `a` |
+| Box 24G days/units | `1` |
+| Box 25 | EIN |
+| Box 27 accept assignment | Yes |
+
+Signature dates come from the clinical note's `updated_at`.
 
 ## static/HCFA.pdf
 
-The blank HCFA-1500 template that `generate_hcfa_bill`'s overlay gets merged onto. The coordinate values in that function only make sense relative to this exact file — swapping the template would require re-deriving every position.
-
-## urls.py
-
-One route: `patient/<int:patient_id>/generate-selected/` → `GenerateSelectedPDFView`, named `generate_selected` under the `pdf_app` namespace.
-
-## apps.py
-
-Standard Django boilerplate. No `models.py` or `admin.py` — this app generates files on request, it doesn't store anything.
+Blank HCFA-1500 template. Loaded via the relative path `pdf/static/HCFA.pdf`, so the app must run from `drchrono_compiler/`. All coordinates in `generate_hcfa_bill` are tuned to this exact file.

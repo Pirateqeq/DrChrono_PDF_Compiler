@@ -1,31 +1,25 @@
 # search/
 
-Part of the [DrChrono PDF Compiler](../../README.md), which connects to DrChrono (a cloud-based EHR / practice-management platform) to generate billing PDFs. This doc covers the `search/` app only.
-
-Lets a logged-in user look up a DrChrono patient by name and/or date of birth. No database model of its own — search results are kept in the session between the search and results pages, not persisted.
-
-## services.py
-
-- **`search_patients(request, search_filters)`** — Calls DrChrono's `/api/patients_summary` with whatever filters were provided (`first_name`, `last_name`, `date_of_birth`, `chart_id`), capping `page_size` at 200. If a DOB comes in as `MM/DD/YYYY` it's converted to `YYYY-MM-DD` before the request, since that's what the API expects. Returns `(patients, next_cursor)`. Raises [`DrChronoAuthError`](../verify/DOC.md) on a 401/403 (bad token or missing scope) and `ValueError` for any other API or network failure. It's wrapped in `@require_auth`/`@login_required` (see [`verify`](../verify/DOC.md)) even though it's a plain helper function rather than a URL-routed view — it's only ever called from `PatientSearchView`, which has already enforced auth by the time this runs.
-
-## views.py
-
-- **`PatientSearchView`** — Renders the search form. On a valid submit, calls `search_patients`, then stores the results, the filters used, and the pagination cursor in the session before redirecting to the results page. Auth errors, request errors, and unexpected exceptions each get a distinct user-facing message via Django's messages framework. Gated by `require_auth`, same as every other protected view — see [`verify`](../verify/DOC.md).
-- **`PatientResultsView`** — Plain GET view that reads the patient list, filters, and cursor back out of the session and renders them. If the session is empty (e.g. direct navigation without a prior search), it just shows "no results."
+Patient lookup by name and/or date of birth. Results are kept in the session, not the database. Part of the [DrChrono PDF Compiler](../../README.md).
 
 ## forms.py
 
-- **`PatientSearchForm`** — All three fields (`first_name`, `last_name`, `date_of_birth`) are individually optional. The actual requirement lives in `clean()`: at least one of the three must be filled in, or the form is rejected with a validation error.
+- **`PatientSearchForm`** — `first_name`, `last_name`, `date_of_birth` (accepts `YYYY-MM-DD` or `MM/DD/YYYY`). Each is optional, but `clean()` requires at least one.
+
+## services.py
+
+- **`search_patients(request, search_filters)`** — `GET /api/patients_summary` with `first_name`, `last_name`, `date_of_birth`, `chart_id` (others ignored). `page_size` defaults to 50, max 200. Returns `(patients, next_cursor)`.
+  - 401/403 → `DrChronoAuthError`; other HTTP errors → `RuntimeError("client error" | "server error")`.
+  - Wrapped in `login_required` and [`require_auth`](../verify/DOC.md) even though it's a helper, not a routed view.
+
+## views.py
+
+- **`PatientSearchView`** (`/search/`) — Renders the form. On submit, calls `search_patients`, stores results/filters/cursor in the session, and redirects to results. No matches or errors re-render the form with a message.
+- **`PatientResultsView`** (`/search/results/`) — Renders the results stored in the session. Empty session → "no results" notice.
+
+Both are protected by `require_auth`.
 
 ## templates/search/
 
-- **`search.html`** — The search form itself: first name, last name, and date of birth inputs.
-- **`results.html`** — Renders the patient list from `PatientSearchView`'s session data as a table (name, DOB, chart ID), with a link per row into [`appts`](../appts/DOC.md)'s historical appointment list for that patient.
-
-## urls.py
-
-Two routes under the `search_app` namespace: `''` → `PatientSearchView` (`search`), `results/` → `PatientResultsView` (`results`).
-
-## apps.py
-
-Standard Django boilerplate — no custom logic.
+- **`search.html`** — The search form.
+- **`results.html`** — One card per patient (name, DOB, chart ID) linking to that patient's [appointment list](../appts/DOC.md). Warns when more than 30 results come back.
