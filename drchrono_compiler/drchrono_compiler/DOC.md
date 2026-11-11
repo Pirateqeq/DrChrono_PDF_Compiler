@@ -4,12 +4,20 @@ Settings and routing for the [DrChrono PDF Compiler](../../README.md). No busine
 
 ## settings.py
 
-- Secrets, database, and DrChrono client settings come from env vars (see the [README](../../README.md#environment-variables)). DrChrono's auth/token/revoke URLs are hardcoded.
-- `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` list only the Render domain — add `localhost` for local runs.
+- Secrets, database, and DrChrono client settings come from env vars (see the [README](../../README.md#environment-variables)). `load_dotenv` reads `drchrono_compiler/.env` first for local runs; real env vars win. DrChrono's auth/token/revoke URLs are hardcoded.
+- `ALLOWED_HOSTS` is the Render domain, plus `localhost` / `127.0.0.1` when `DEBUG` is on. `CSRF_TRUSTED_ORIGINS` is the Render domain only.
 - When `DEBUG` is off: HTTPS redirect, secure session/CSRF cookies. HSTS (1 year, subdomains, preload) is always set. `SECURE_PROXY_SSL_HEADER` trusts Render's `X-Forwarded-Proto`.
 - `WhiteNoiseMiddleware` serves static files directly from gunicorn.
 - `CSRF_FAILURE_VIEW` = [`verify.views.csrf_failure`](../verify/DOC.md): a CSRF failure sends the user back to log in instead of a 403.
 - `TEMPLATES['DIRS']` points at the project-level `templates/` folder.
+
+## settings_test.py
+
+Used only by the test suite (set in `pytest.ini`). Imports `settings.py`, then swaps in in-memory SQLite, a fixed secret key, dummy DrChrono client settings, and turns off the HTTPS redirect and secure cookies.
+
+## tests.py
+
+Project-wide checks: every named route reverses and resolves, `manage.py check` passes, and the layout shows the right connection status.
 
 ## urls.py
 

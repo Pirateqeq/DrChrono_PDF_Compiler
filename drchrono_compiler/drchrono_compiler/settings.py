@@ -12,11 +12,16 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import dj_database_url
+from dotenv import load_dotenv
 
 import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Local development: read drchrono_compiler/.env if it exists. Real environment
+# variables (e.g. on Render) take precedence over the file.
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -29,6 +34,8 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = ['drchrono-pdf-compiler.onrender.com']
+if DEBUG:
+    ALLOWED_HOSTS += ['localhost', '127.0.0.1']
 
 # HTTPS / cookie hardening — Render terminates TLS and forwards X-Forwarded-Proto
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

@@ -17,7 +17,7 @@ Internal tool for one practice. It handles real PHI and billing data; practice d
 
 ## Project layout
 
-All code lives in `drchrono_compiler/`. Each app has a `DOC.md` with details.
+All code lives in `drchrono_compiler/`. See [`SYSTEM_MAP.md`](SYSTEM_MAP.md) for how the parts connect; each app has a `DOC.md` with details.
 
 | Path | Purpose |
 |---|---|
@@ -48,6 +48,8 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+Set the [environment variables](#environment-variables), with these local values: `DEBUG=True` (also allows `localhost`), `DATABASE_URL=sqlite:///db.sqlite3`, `DRCHRONO_REDIRECT_URI=http://localhost:8000/oauth/callback` (register it in your DrChrono app) and `OAUTHLIB_INSECURE_TRANSPORT=1` for OAuth over plain HTTP.
+
 ```bash
 python manage.py migrate
 ```
@@ -56,14 +58,29 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-For local runs:
-- Add `localhost` / `127.0.0.1` to `ALLOWED_HOSTS` in `settings.py` (it only lists the Render domain).
-- Use `DATABASE_URL=sqlite:///db.sqlite3` if you don't have PostgreSQL.
-- Set `DRCHRONO_REDIRECT_URI=http://localhost:8000/oauth/callback` (and register it in DrChrono). OAuth over plain HTTP also needs `OAUTHLIB_INSECURE_TRANSPORT=1`.
+## Tests
+
+pytest with pytest-django, run from `drchrono_compiler/`. Tests use `drchrono_compiler/settings_test.py` (in-memory SQLite, dummy credentials), so no environment variables are needed. DrChrono is always mocked; any real network call fails the test.
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+```bash
+pytest
+```
+
+```bash
+pytest --cov --cov-report=term-missing
+```
+
+- Each app's tests live in its `tests.py`; project-wide checks are in `drchrono_compiler/tests.py`.
+- Shared fixtures (signed-in client, credential, request builder) are in `conftest.py`; fake DrChrono data and responses are in `core/testing.py`.
+- GitHub Actions runs the suite on every push and pull request (`.github/workflows/tests.yml`).
 
 ## Environment variables
 
-Read with `os.getenv`; there is no `.env` loader.
+Set them in your shell, or locally in `drchrono_compiler/.env` (git-ignored, loaded automatically). On Render, set them in the dashboard.
 
 | Variable | Used for |
 |---|---|
