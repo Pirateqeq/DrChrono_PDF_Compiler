@@ -48,6 +48,14 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+Create your `.env` from the template and fill in the blanks:
+
+```bash
+cp .env.example .env   # Windows: copy .env.example .env
+```
+
+The template already has the local values: SQLite, `DEBUG=True` (which also allows `localhost`), the `http://localhost:8000/oauth/callback` redirect URI (register it in your DrChrono app) and `OAUTHLIB_INSECURE_TRANSPORT=1` for OAuth over plain HTTP.
+
 ```bash
 python manage.py migrate
 ```
@@ -55,11 +63,6 @@ python manage.py migrate
 ```bash
 python manage.py runserver
 ```
-
-For local runs:
-- Add `localhost` / `127.0.0.1` to `ALLOWED_HOSTS` in `settings.py` (it only lists the Render domain).
-- Use `DATABASE_URL=sqlite:///db.sqlite3` if you don't have PostgreSQL.
-- Set `DRCHRONO_REDIRECT_URI=http://localhost:8000/oauth/callback` (and register it in DrChrono). OAuth over plain HTTP also needs `OAUTHLIB_INSECURE_TRANSPORT=1`.
 
 ## Tests
 
@@ -83,7 +86,7 @@ pytest --cov --cov-report=term-missing
 
 ## Environment variables
 
-Read with `os.getenv`; there is no `.env` loader.
+Locally they come from `drchrono_compiler/.env` (git-ignored; template in `.env.example`). On Render, set them in the dashboard; real environment variables override `.env`.
 
 | Variable | Used for |
 |---|---|

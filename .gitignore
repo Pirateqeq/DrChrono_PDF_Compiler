@@ -1,0 +1,34 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python / virtualenv
+*.pyc
+__pycache__/
+.venv/
+venv/
+
+# Django artifacts
+db.sqlite3
+*.sqlite3
+staticfiles/
+media/
+
+# Test / coverage output
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE / editor
+.vscode/
+.VSCodeCounter/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+TEST_PLAN.md
+Template_Integration_Plan.md
+*.log
