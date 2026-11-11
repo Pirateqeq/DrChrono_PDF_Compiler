@@ -4,10 +4,10 @@ Rewrite of the `verify` app (DrChrono sign-in and tokens) as a lean, hand-writte
 
 ## Decision
 
-**Direction A: lean, hand-written flow.** One Django `User` + `DrChronoCredential` per staff member, plain `requests` calls following DrChrono's own documented example.
+**Direction A: lean, hand-written flow.** One Django `User` + `DrChronoCredential` per staff member. Sign-in stays DrChrono's OAuth2 authorization-code flow; only the helper library goes. Each OAuth2 step is a plain `requests` call, as in DrChrono's own documented example.
 
 - Every staff member signs in as themselves, so DrChrono's audit trail shows who accessed which patient (required for PHI).
-- Drops `requests-oauthlib` and `oauthlib`; no new dependencies.
+- Drops the `requests-oauthlib` and `oauthlib` helper libraries (OAuth2 itself stays); no new dependencies.
 - No database migration; no changes to `search`, `appts` or `pdf`.
 
 Rejected: Authlib (B, swaps one dependency for another, saves ~30 lines), shared practice connection (C, loses per-person audit trail), session-only (D, needs a migration and edits outside `verify`).
@@ -97,7 +97,7 @@ def get_valid_access_token(request) -> str        # kept so search/appts/pdf wor
 
 ### Removed
 
-- `requests-oauthlib` and `oauthlib` from `requirements.txt`.
+- `requests-oauthlib` and `oauthlib` from `requirements.txt` (helper libraries only; the OAuth2 flow is implemented directly in `services.py`).
 - `OAUTHLIB_INSECURE_TRANSPORT` (no longer needed locally).
 - `DRCHRONO_AUTH_URL`, `DRCHRONO_TOKEN_URL`, `DRCHRONO_REVOKE_URL` from `settings.py` (moved into `services.py` or unused). `DRCHRONO_CLIENT_ID`, `DRCHRONO_CLIENT_SECRET`, `DRCHRONO_REDIRECT_URI`, `DRCHRONO_SCOPES` stay as env vars.
 
