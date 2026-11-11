@@ -17,7 +17,7 @@ Internal tool for one practice. It handles real PHI and billing data; practice d
 
 ## Project layout
 
-All code lives in `drchrono_compiler/`. Each app has a `DOC.md` with details.
+All code lives in `drchrono_compiler/`. See [`SYSTEM_MAP.md`](SYSTEM_MAP.md) for how the parts connect; each app has a `DOC.md` with details.
 
 | Path | Purpose |
 |---|---|
