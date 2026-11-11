@@ -15,3 +15,11 @@ Each function takes the `requests` module and auth `headers` from the caller, us
   - have a clinical note PDF URL
 
   Converts `scheduled_time` to a `datetime` and returns the list newest first.
+
+## testing.py
+
+Test-only helpers imported by every app's `tests.py`:
+- `make_patient`, `make_appointment`, `make_line_item`, `make_pdf_bytes` — fake DrChrono records and PDFs.
+- `fake_response` — stand-in for `requests.Response` (`.json()`, `.content`, `.raise_for_status()`).
+- `FakeDrChrono` — replaces the `requests` module; routes `get(url)` to canned responses and fails on unknown URLs.
+- `message_texts(response)` — the flash messages a request produced.

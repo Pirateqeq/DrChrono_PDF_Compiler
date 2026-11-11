@@ -61,6 +61,26 @@ For local runs:
 - Use `DATABASE_URL=sqlite:///db.sqlite3` if you don't have PostgreSQL.
 - Set `DRCHRONO_REDIRECT_URI=http://localhost:8000/oauth/callback` (and register it in DrChrono). OAuth over plain HTTP also needs `OAUTHLIB_INSECURE_TRANSPORT=1`.
 
+## Tests
+
+pytest with pytest-django, run from `drchrono_compiler/`. Tests use `drchrono_compiler/settings_test.py` (in-memory SQLite, dummy credentials), so no environment variables are needed. DrChrono is always mocked; any real network call fails the test.
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+```bash
+pytest
+```
+
+```bash
+pytest --cov --cov-report=term-missing
+```
+
+- Each app's tests live in its `tests.py`; project-wide checks are in `drchrono_compiler/tests.py`.
+- Shared fixtures (signed-in client, credential, request builder) are in `conftest.py`; fake DrChrono data and responses are in `core/testing.py`.
+- GitHub Actions runs the suite on every push and pull request (`.github/workflows/tests.yml`).
+
 ## Environment variables
 
 Read with `os.getenv`; there is no `.env` loader.

@@ -11,6 +11,14 @@ Settings and routing for the [DrChrono PDF Compiler](../../README.md). No busine
 - `CSRF_FAILURE_VIEW` = [`verify.views.csrf_failure`](../verify/DOC.md): a CSRF failure sends the user back to log in instead of a 403.
 - `TEMPLATES['DIRS']` points at the project-level `templates/` folder.
 
+## settings_test.py
+
+Used only by the test suite (set in `pytest.ini`). Imports `settings.py`, then swaps in in-memory SQLite, a fixed secret key, dummy DrChrono client settings, and turns off the HTTPS redirect and secure cookies.
+
+## tests.py
+
+Project-wide checks: every named route reverses and resolves, `manage.py check` passes, and the layout shows the right connection status.
+
 ## urls.py
 
 | Prefix | App | Namespace |

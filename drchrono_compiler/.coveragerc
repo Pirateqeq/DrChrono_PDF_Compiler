@@ -1,0 +1,10 @@
+[run]
+source = .
+omit =
+    */migrations/*
+    */tests.py
+    conftest.py
+    core/testing.py
+    manage.py
+    drchrono_compiler/settings*.py
+    drchrono_compiler/wsgi.py
