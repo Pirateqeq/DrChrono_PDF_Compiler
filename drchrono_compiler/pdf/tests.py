@@ -23,7 +23,7 @@ from pdf.services import (
 )
 
 GENERATE_URL = reverse('pdf_app:generate_selected', kwargs={'patient_id': 101})
-LIST_URL = reverse('appts_app:historical_list', kwargs={'patient_id': 101, 'patient_name': 'Jane Doe'})
+LIST_URL = reverse('appts_app:historical_list', kwargs={'patient_id': 101})
 HCFA_HEIGHT = 800
 
 
@@ -230,7 +230,7 @@ class TestGenerateClinicalNotes:
 
 class TestGenerateSelectedPDFView:
     def generate(self, client, selected=('2', '1')):
-        return client.post(GENERATE_URL, {'selected_appts': list(selected), 'patient_name': 'Jane Doe'})
+        return client.post(GENERATE_URL, {'selected_appts': list(selected)})
 
     def test_anonymous_user_redirected_to_login(self, client, db):
         response = self.generate(client)
@@ -293,8 +293,6 @@ class TestGenerateSelectedPDFView:
         assert 'Failed to download clinical note for 1' in message_texts(response)
 
     def test_no_visits_selected(self, auth_client, drchrono):
-        # Known bug: the redirect names 'appts:historical_list' (the namespace is
-        # 'appts_app') and omits patient_name, so this raises NoReverseMatch (a 500).
         response = self.generate(auth_client, selected=[])
 
         assert response.status_code == 302

@@ -29,7 +29,7 @@ class GenerateSelectedPDFView(View):
         selected_ids = request.POST.getlist('selected_appts')
         if not selected_ids:
             messages.warning(request, "No appointments were selected for PDF generation.")
-            return redirect('appts:historical_list', patient_id=patient_id)
+            return redirect('appts_app:historical_list', patient_id=patient_id)
 
         try:
             selected_ids = list(reversed(selected_ids))
@@ -77,8 +77,7 @@ class GenerateSelectedPDFView(View):
             return response
 
         except Exception as e:
-            patient_name = request.POST.get("patient_name")
             messages.error(request, f"PDF generation failed.")
             for er in e.args:
                 messages.error(request, str(er))
-            return redirect('appts_app:historical_list', patient_id=patient_id, patient_name=patient_name)
+            return redirect('appts_app:historical_list', patient_id=patient_id)

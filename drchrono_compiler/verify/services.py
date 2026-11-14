@@ -10,9 +10,8 @@ from django.db import transaction
 from django.shortcuts import redirect
 from django.utils import timezone
 
-from core.drchrono import DRCHRONO
+from core.drchrono import DRCHRONO, DrChronoAuthError
 
-from .exceptions import DrChronoAuthError
 from .models import DrChronoCredential
 
 
@@ -73,16 +72,16 @@ def get_access_token(user):
 
 
 def require_auth(view):
-    """Run the view with request.drchrono_token set, or send the user to sign in."""
+    """Run the view with request.drchrono_token set; send the user to sign in if DrChrono rejects the token."""
     @wraps(view)
     def wrapper(request, *args, **kwargs):
         if not request.user.is_authenticated:
             return redirect('verify_app:connect_drchrono')
         try:
             request.drchrono_token = get_access_token(request.user)
+            return view(request, *args, **kwargs)
         except DrChronoAuthError:
             return back_to_sign_in(request, 'Your DrChrono session expired, please sign in again.')
-        return view(request, *args, **kwargs)
     return wrapper
 
 

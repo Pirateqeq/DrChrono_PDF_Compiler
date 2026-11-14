@@ -5,7 +5,7 @@ import pytest
 import requests
 
 from core import drchrono
-from core.drchrono import DrChronoError
+from core.drchrono import DrChronoAuthError, DrChronoError
 from core.testing import FakeDrChrono, fake_response, make_appointment, make_line_item, make_patient
 
 
@@ -25,6 +25,20 @@ def page(results, next_url=None):
     return fake_response({'previous': None, 'results': results, 'next': next_url})
 
 
+# ── user_message ──────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize('status, text', [
+    (None, "isn't responding"),
+    (403, "doesn't have permission"),
+    (404, "couldn't find that record"),
+    (429, 'hourly request limit'),
+    (500, 'returned an error'),
+    (400, 'returned an error'),
+])
+def test_user_message(status, text):
+    assert text in drchrono.user_message(DrChronoError('x', status))
+
+
 # ── get / get_all ─────────────────────────────────────────────────────────────
 
 class TestGet:
@@ -38,7 +52,14 @@ class TestGet:
         assert call['params'] == {'verbose': 'true'}
         assert call['timeout'] == 10
 
-    @pytest.mark.parametrize('status', [401, 404, 429, 500])
+    def test_rejected_token_raises_auth_error_not_drchrono_error(self, api):
+        api.routes['/api/patients/101'] = fake_response({}, status=401)
+
+        with pytest.raises(DrChronoAuthError):
+            drchrono.get('tok', '/api/patients/101')
+        assert not issubclass(DrChronoAuthError, DrChronoError)
+
+    @pytest.mark.parametrize('status', [403, 404, 429, 500])
     def test_http_error_carries_status(self, status, api):
         api.routes['/api/patients/101'] = fake_response({}, status=status)
 

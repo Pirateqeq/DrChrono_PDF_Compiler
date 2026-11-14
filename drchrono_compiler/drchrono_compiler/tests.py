@@ -9,8 +9,7 @@ ROUTES = [
     ('verify_app:oauth_callback', {}, '/oauth/callback'),
     ('search_app:search', {}, '/search/'),
     ('search_app:results', {}, '/search/results/'),
-    ('appts_app:historical_list', {'patient_id': 101, 'patient_name': 'Jane Doe'},
-     '/appts/patient/101_Jane%20Doe/historical/'),
+    ('appts_app:historical_list', {'patient_id': 101}, '/appts/patient/101/'),
     ('pdf_app:generate_selected', {'patient_id': 101}, '/pdf/patient/101/generate-selected/'),
 ]
 
@@ -19,6 +18,11 @@ ROUTES = [
 def test_named_routes(name, kwargs, path):
     assert reverse(name, kwargs=kwargs) == path
     assert resolve(path.replace('%20', ' ')).view_name == name
+
+
+def test_sessions_last_a_clinic_day(auth_client):
+    auth_client.get(reverse('search_app:search'))
+    assert auth_client.session.get_expiry_age() == 12 * 60 * 60
 
 
 def test_system_check_passes():

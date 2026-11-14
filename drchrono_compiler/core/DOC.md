@@ -9,7 +9,9 @@ Callers pass the access token that [`require_auth`](../verify/DOC.md) puts on `r
 ### Requests and errors
 
 - **`get(token, path, **params)`** — The one place that calls DrChrono for data. Prefixes `https://app.drchrono.com` (`DRCHRONO`, the app's only copy of the address; `verify` imports it), adds `Authorization: Bearer <token>`, sends `params` as the query string, and uses a 10-second timeout. It only takes paths, so the token can only ever go to DrChrono.
-- **`DrChronoError`** — Raised for any failure: network error, timeout, non-2xx status or unreadable reply. `.status` is the HTTP status code (401, 403, 404, 429, 5xx…), or `None` when DrChrono never answered. Callers decide what each status means for the user (see `search/services.py`).
+- **`DrChronoError`** — Raised for any failure except a rejected token: network error, timeout, non-2xx status or unreadable reply. `.status` is the HTTP status code (403, 404, 429, 5xx…), or `None` when DrChrono never answered. Callers show `user_message(e)`.
+- **`DrChronoAuthError`** — Raised instead for a 401 (DrChrono rejected the token), and by `verify` when sign-in or a token refresh fails. It is deliberately **not** a `DrChronoError`, so a view's `except DrChronoError` can't swallow it: it reaches [`require_auth`](../verify/DOC.md), which sends the user to sign in.
+- **`user_message(error)`** — Plain-English text for a `DrChronoError`, by status: none → "DrChrono isn't responding. Try again in a moment."; 403 → no permission; 404 → record not found; 429 → hourly limit reached, try after the top of the hour; anything else → "DrChrono returned an error. Try again in a moment."
 - **`get_all(token, path, **params)`** — For list endpoints. DrChrono returns `{"previous", "results", "next"}` with `next` set to the full URL of the next page (query already included). It keeps requesting the path and query of `next` (never its host) until `next` is empty, and returns every `results` item.
 
 ### Endpoint helpers
