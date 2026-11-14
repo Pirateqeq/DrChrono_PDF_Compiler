@@ -4,7 +4,6 @@ from unittest.mock import patch
 import pytest
 from django.urls import reverse
 from pypdf import PdfReader
-from reportlab.pdfgen.canvas import Canvas
 
 from core.testing import (
     FakeDrChrono,
@@ -24,16 +23,11 @@ from pdf.golden import (
     GOLDEN_VISIT,
     record_drawing,
 )
-from pdf.services import (
-    fetch_hcfa_data,
-    generate_balance_report,
-    generate_clinical_notes,
-    generate_hcfa_bill,
-)
+from pdf import hcfa
+from pdf.services import generate_balance_report, generate_clinical_notes
 
 GENERATE_URL = reverse('pdf_app:generate_selected', kwargs={'patient_id': 101})
 LIST_URL = reverse('appts_app:historical_list', kwargs={'patient_id': 101})
-HCFA_HEIGHT = 800
 
 
 def pdf_text(data):
@@ -75,32 +69,11 @@ def drchrono():
         yield fake
 
 
-@pytest.fixture
-def drawn():
-    """Record every Canvas.drawString call as {(x, y): text}."""
-    calls = {}
-    original = Canvas.drawString
-
-    def record(self, x, y, text, *args, **kwargs):
-        calls[(x, y)] = text
-        return original(self, x, y, text, *args, **kwargs)
-
-    with patch.object(Canvas, 'drawString', record):
-        yield calls
-
-
-def hcfa_data(**patient_overrides):
-    data = two_visits()
-    return fetch_hcfa_data(make_patient(**patient_overrides), make_appointment(1), data['line_items'][1])
-
-
-# ── fetch_hcfa_data ───────────────────────────────────────────────────────────
-
 # ── Golden output: the overhaul must reproduce today's documents ──────────────
 
 class TestGoldenOutput:
     def test_claim_form_drawing_unchanged(self):
-        drawn = record_drawing(lambda: generate_hcfa_bill(None, fetch_hcfa_data(make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES)))
+        drawn = record_drawing(lambda: hcfa.claim_forms(make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES))
         assert drawn == CLAIM_FORM_GOLDEN
 
     def test_balance_report_text_unchanged(self, drchrono):
@@ -114,86 +87,75 @@ class TestGoldenOutput:
         assert pdf_text(generate_balance_report(101, 'tok'))[0] == BALANCE_REPORT_GOLDEN
 
 
-class TestFetchHcfaData:
-    def test_maps_patient_and_visit_fields(self):
-        data = hcfa_data()
+# ── hcfa ──────────────────────────────────────────────────────────────────────
 
-        assert data['first_name'] == 'Jane'
-        assert data['last_name'] == 'Doe'
-        assert data['dob'] == '1980-04-15'
-        assert data['gender'] == 'Female'
-        assert (data['address'], data['city'], data['state'], data['zip']) == \
-            ('123 Main St', 'Springfield', 'IL', '62701')
-        assert data['icd10_codes'] == ['M54.5']
-        assert data['signature_date'] == '2025-03-10T12:00:00'
-
-    def test_reads_practice_details_from_env(self):
-        data = hcfa_data()
-
-        assert data['provider_npi'] == '1234567890'
-        assert data['federal_id'] == '12-3456789'
-        assert data['account_number'] == 'ACCT-42'
-        assert data['physician_signature'] == 'Dr. Sam Smith'
-        assert data['provider_number'] == '217 555-0199'
-
-    def test_formats_phone_number(self):
-        assert hcfa_data()['number'] == '217 555 0123'
-
-    def test_collects_line_items_in_order(self):
-        data = hcfa_data()
-
-        assert data['code'] == ['99213', '97140']
-        assert data['charges'] == ['150.00', '40.00']
-        assert data['service_date'] == ['2025-03-10', '2025-03-10']
-        assert data['diagnosis_pointer'] == [[1], [1]]
-
-    def test_missing_fields_are_all_listed(self, monkeypatch):
-        monkeypatch.delenv('PROVIDER_NPI')
-
-        with pytest.raises(Exception) as exc:
-            hcfa_data(zip_code='', city=None)
-
-        errors = exc.value.args[0]
-        assert 'Missing Patient Zip' in errors
-        assert 'Missing Patient City' in errors
-        assert 'Missing Patient Provider Npi' in errors
+def charges(count):
+    return [make_line_item(1, str(99200 + n), f'{10 + n}.00') for n in range(count)]
 
 
-# ── generate_hcfa_bill ────────────────────────────────────────────────────────
+class TestClaimForms:
+    def test_one_page_form_on_the_template(self):
+        forms = hcfa.claim_forms(make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES)
 
-class TestGenerateHcfaBill:
-    def test_one_page_with_claim_details(self):
-        pages = pdf_text(generate_hcfa_bill(None, hcfa_data()))
-
+        assert len(forms) == 1
+        pages = pdf_text(forms[0])
         assert len(pages) == 1
-        for expected in ['Doe, Jane', '123 Main St', '62701', '555-0123', 'M54.5', '99213', '97140',
-                         '1234567890', '12-3456789', 'ACCT-42', 'Signature on File', '03/10/2025',
-                         'Dr. Sam Smith', '500 Oak Ave']:
-            assert expected in pages[0], expected
+        assert 'FORM 1500' in pages[0] and 'Doe, Jane' in pages[0]  # template text plus the overlay
 
-    def test_total_charge_is_sum_of_line_items(self, drawn):
-        generate_hcfa_bill(None, hcfa_data())
+    def test_more_than_six_charges_continue_on_another_form(self):
+        drawn = record_drawing(lambda: hcfa.claim_forms(make_patient(), GOLDEN_VISIT, charges(7)))
 
-        assert drawn[(390, HCFA_HEIGHT - 698)] == '190'
-        assert drawn[(443, HCFA_HEIGHT - 698)] == '00'
+        codes = sorted(text for x, y, text in drawn if x == hcfa.LINE_X['code'])
+        assert codes == [str(99200 + n) for n in range(7)]
+        totals = [text for x, y, text in drawn if (x, y) == (390, hcfa.PAGE_HEIGHT - 698)]
+        assert sorted(totals) == ['16', '75']  # 10+11+...+15 on the first form, 16 on the second
+        assert len(hcfa.claim_forms(make_patient(), GOLDEN_VISIT, charges(7))) == 2
 
-    def test_one_service_row_per_line_item(self, drawn):
-        generate_hcfa_bill(None, hcfa_data())
-
-        assert drawn[(210, HCFA_HEIGHT - 555)] == '99213'
-        assert drawn[(210, HCFA_HEIGHT - 579)] == '97140'
-        assert (210, HCFA_HEIGHT - 603) not in drawn
-
-    @pytest.mark.parametrize('gender, x', [('Female', 360), ('Male', 324)])
-    def test_sex_checkbox(self, gender, x, drawn):
-        generate_hcfa_bill(None, hcfa_data(gender=gender))
-        assert drawn[(x, HCFA_HEIGHT - 148)] == '✓'
+    def test_six_charges_fit_one_form(self):
+        assert len(hcfa.claim_forms(make_patient(), GOLDEN_VISIT, charges(6))) == 1
 
     def test_phone_without_area_code(self):
-        # Known bug: a phone number that isn't exactly 10 digits isn't split into
-        # area code and number, and drawing it raises IndexError.
-        pages = pdf_text(generate_hcfa_bill(None, hcfa_data(cell_phone='555-0123')))
-        assert 'Doe, Jane' in pages[0]
+        # Was a known bug: a phone number that isn't 10 digits raised IndexError.
+        drawn = record_drawing(lambda: hcfa.claim_forms(make_patient(cell_phone='555-0123'), GOLDEN_VISIT, GOLDEN_CHARGES))
+
+        assert (162, hcfa.PAGE_HEIGHT - 221, '555-0123') in drawn
+        assert not any(x == 134 and y == hcfa.PAGE_HEIGHT - 221 for x, y, _ in drawn)
+
+    @pytest.mark.parametrize('gender, x', [('Female', 360), ('Male', 324)])
+    def test_sex_checkbox(self, gender, x):
+        drawn = record_drawing(lambda: hcfa.claim_forms(make_patient(gender=gender), GOLDEN_VISIT, GOLDEN_CHARGES))
+        assert (x, hcfa.PAGE_HEIGHT - 148, '✓') in drawn
+
+    @pytest.mark.parametrize('visit, items, reason', [
+        (GOLDEN_VISIT, [], 'no charges'),
+        ({**GOLDEN_VISIT, 'icd10_codes': []}, GOLDEN_CHARGES, 'no ICD-10 diagnosis codes'),
+        ({**GOLDEN_VISIT, 'clinical_note': {'pdf': 'https://x/n.pdf'}}, GOLDEN_CHARGES, 'no signature date'),
+    ])
+    def test_visit_problems_raise_claim_error(self, visit, items, reason):
+        with pytest.raises(hcfa.ClaimError, match=reason):
+            hcfa.claim_forms(make_patient(), visit, items)
+
+    def test_inputs_unchanged(self):
+        patient, visit, items = make_patient(), dict(GOLDEN_VISIT), [dict(c) for c in GOLDEN_CHARGES]
+
+        hcfa.claim_forms(patient, visit, items)
+
+        assert (patient, visit, items) == (make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES)
+
+    def test_no_pypdf_deprecation_warning(self, recwarn):
+        hcfa.claim_forms(make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES)
+        assert not [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
+
+
+class TestMissingDetails:
+    def test_complete_patient_and_practice(self):
+        assert hcfa.missing_details(make_patient()) == []
+
+    def test_lists_everything_missing(self, monkeypatch):
+        monkeypatch.delenv('PROVIDER_NPI')
+
+        assert hcfa.missing_details(make_patient(zip_code='', city=None)) == [
+            'patient city', 'patient zip code', 'practice setting PROVIDER_NPI']
 
 
 # ── generate_balance_report ───────────────────────────────────────────────────

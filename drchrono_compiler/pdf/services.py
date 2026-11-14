@@ -264,7 +264,7 @@ def generate_hcfa_bill(request, data: dict) -> BytesIO:
     """
     PRINT_ERRORS = False
     if PRINT_ERRORS: print(json.dumps(data, indent=4))
-    blank_pdf = 'pdf/static/HCFA.pdf'
+    blank_pdf = 'pdf/forms/HCFA.pdf'
     buffer = BytesIO()
     HCFA_SIZE = (620, 800)
     c = canvas.Canvas(buffer, pagesize= HCFA_SIZE)
