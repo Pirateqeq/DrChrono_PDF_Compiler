@@ -205,96 +205,145 @@ class TestRequireAuth:
         assert response.content == b'valid-access-token'
 
 
-# ── Login views ───────────────────────────────────────────────────────────────
+# ── Sign-in views ─────────────────────────────────────────────────────────────
 
-class TestConnectDrChrono:
-    def test_redirects_to_drchrono_authorize_with_state(self, client, db):
+AUTHORIZE_URL = reverse('verify_app:authorize')
+CALLBACK_TOKEN = {'access_token': 'callback-access', 'refresh_token': 'callback-refresh', 'expires_in': 7200}
+
+
+class TestConnectPage:
+    def test_shows_sign_in_button(self, client, db):
         response = client.get(LOGIN_URL)
 
-        assert response.status_code == 302
-        url = urlparse(response.url)
-        query = parse_qs(url.query)
-        assert f'{url.scheme}://{url.netloc}{url.path}' == 'https://app.drchrono.com/o/authorize/'
-        assert query['client_id'] == ['test-client-id']
-        assert query['redirect_uri'] == ['https://testserver/oauth/callback']
-        assert 'patients:read' in query['scope'][0]
+        assert response.status_code == 200
+        assert f'href="{AUTHORIZE_URL}"' in response.content.decode()
+
+    def test_signed_in_user_goes_to_search(self, auth_client):
+        response = auth_client.get(LOGIN_URL)
+        assert response.url == SEARCH_URL
+
+    def test_signed_in_user_with_dead_token_sees_sign_in(self, auth_client, credential, drchrono_http):
+        expire(credential)
+        drchrono_http.return_value = fake_response({}, status=400)
+
+        response = auth_client.get(LOGIN_URL)
+
+        assert response.status_code == 200
+        assert b'Sign in with DrChrono' in response.content
+
+
+class TestAuthorize:
+    def test_redirects_to_drchrono_with_saved_state(self, client, db):
+        response = client.get(AUTHORIZE_URL)
+
+        query = parse_qs(urlparse(response.url).query)
+        assert response.url.startswith('https://app.drchrono.com/o/authorize/?')
         assert query['state'] == [client.session['oauth_state']]
-
-
-TOKEN = {'access_token': 'callback-access', 'refresh_token': 'callback-refresh', 'expires_in': 7200}
+        assert len(client.session['oauth_state']) >= 32
 
 
 @pytest.fixture
 def drchrono_login():
-    """Patch the token exchange and user lookup that oauth_callback performs."""
-    with patch('verify.views.OAuth2Session') as session_cls, \
-            patch('verify.views.requests.get') as get:
-        session_cls.return_value.fetch_token.return_value = dict(TOKEN)
-        get.return_value = fake_response({'username': 'drjane'})
-        yield session_cls.return_value, get
+    """DrChrono answers the token exchange and the current-user lookup."""
+    def respond(method, url, **kwargs):
+        if method == 'POST':
+            return fake_response(dict(CALLBACK_TOKEN))
+        return fake_response({'id': 7, 'username': 'drjane'})
+
+    with patch('verify.services.requests.request', side_effect=respond) as request:
+        yield request
+
+
+def sign_in(client, **params):
+    """Start sign-in, then return from DrChrono to the callback with the saved state."""
+    client.get(AUTHORIZE_URL)
+    query = {'code': 'abc', 'state': client.session['oauth_state']} | params
+    return client.get(CALLBACK_URL, {k: v for k, v in query.items() if v is not None})
 
 
 class TestOAuthCallback:
     def test_new_user_is_created_and_logged_in(self, client, db, drchrono_login):
-        response = client.get(CALLBACK_URL, {'code': 'abc', 'state': 'xyz'})
+        response = sign_in(client)
 
-        assert response.status_code == 302
         assert response.url == SEARCH_URL
         user = User.objects.get(username='drjane')
         assert user.drchrono_cred.access_token == 'callback-access'
         assert user.drchrono_cred.refresh_token == 'callback-refresh'
         assert user.drchrono_cred.expires_at > timezone.now() + timedelta(seconds=7100)
         assert client.session['_auth_user_id'] == str(user.pk)
+        assert 'oauth_state' not in client.session
         assert 'Successfully connected as drjane' in message_texts(response)
 
-    def test_new_user_has_unusable_password(self, client, db, drchrono_login):
-        # Known bug: set_unusable_password() runs after the user is saved and is never
-        # saved itself, so the stored password is '' rather than marked unusable.
-        client.get(CALLBACK_URL, {'code': 'abc', 'state': 'xyz'})
+    def test_code_exchange_request(self, client, db, drchrono_login):
+        sign_in(client)
 
+        token_call, user_call = drchrono_login.call_args_list
+        assert token_call.kwargs['data'] == {
+            'grant_type': 'authorization_code', 'code': 'abc',
+            'redirect_uri': 'https://testserver/oauth/callback',
+            'client_id': 'test-client-id', 'client_secret': 'test-client-secret',
+        }
+        assert user_call.kwargs['headers'] == {'Authorization': 'Bearer callback-access'}
+
+    def test_new_user_has_unusable_password(self, client, db, drchrono_login):
+        sign_in(client)
         assert not User.objects.get(username='drjane').has_usable_password()
 
     def test_existing_user_gets_new_tokens(self, client, credential, drchrono_login):
-        client.get(CALLBACK_URL, {'code': 'abc', 'state': 'xyz'})
+        sign_in(client)
 
         credential.refresh_from_db()
         assert credential.access_token == 'callback-access'
         assert User.objects.count() == 1
 
     def test_signed_in_user_with_expired_token_gets_new_tokens(self, auth_client, credential, drchrono_login):
-        # Known bug: the callback returns early for an already signed-in user and drops
-        # the new tokens, so a user whose refresh failed loops back to DrChrono sign-in.
         expire(credential)
 
-        auth_client.get(CALLBACK_URL, {'code': 'abc', 'state': 'xyz'})
+        sign_in(auth_client)
 
         credential.refresh_from_db()
         assert credential.access_token == 'callback-access'
         assert not credential.is_expired
 
-    def test_token_exchange_failure(self, client, db, drchrono_login):
-        session, _ = drchrono_login
-        session.fetch_token.side_effect = Exception('invalid_grant')
-
-        response = client.get(CALLBACK_URL, {'code': 'bad'})
+    @pytest.mark.parametrize('params, message', [
+        ({'error': 'access_denied', 'code': None}, 'Sign-in was cancelled.'),
+        ({'state': 'forged'}, 'Sign-in expired, please try again.'),
+        ({'state': None}, 'Sign-in expired, please try again.'),
+    ])
+    def test_rejected_before_calling_drchrono(self, params, message, client, db, drchrono_login):
+        response = sign_in(client, **params)
 
         assert response.url == LOGIN_URL
-        assert 'Unable to fetch token' in message_texts(response)
+        assert message in message_texts(response)
+        drchrono_login.assert_not_called()
         assert not User.objects.exists()
 
-    def test_user_lookup_failure(self, client, db, drchrono_login):
-        _, get = drchrono_login
-        get.return_value = fake_response({}, status=500)
+    def test_callback_without_starting_sign_in(self, client, db, drchrono_login):
+        response = client.get(CALLBACK_URL, {'code': 'abc', 'state': 'anything'})
 
-        response = client.get(CALLBACK_URL, {'code': 'abc'})
+        assert 'Sign-in expired, please try again.' in message_texts(response)
+        drchrono_login.assert_not_called()
+
+    @pytest.mark.parametrize('failing_method', ['POST', 'GET'])
+    def test_drchrono_failure(self, failing_method, client, db, drchrono_login):
+        respond = drchrono_login.side_effect
+
+        def fail_one(method, url, **kwargs):
+            if method == failing_method:
+                raise requests.ConnectionError('down')
+            return respond(method, url, **kwargs)
+
+        drchrono_login.side_effect = fail_one
+
+        response = sign_in(client)
 
         assert response.url == LOGIN_URL
-        assert 'Could not fetch user information from DrChrono' in message_texts(response)
+        assert "Couldn't sign in to DrChrono, please try again." in message_texts(response)
         assert not User.objects.exists()
 
 
 class TestCsrfFailure:
-    def test_redirects_to_login_with_message(self, credential):
+    def test_redirects_to_sign_in_with_message(self, credential):
         client = Client(enforce_csrf_checks=True)
         client.force_login(credential.user)
 
@@ -302,7 +351,7 @@ class TestCsrfFailure:
 
         assert response.status_code == 302
         assert response.url == LOGIN_URL
-        assert 'Your session has expired please relogin' in message_texts(response)
+        assert 'Your session has expired, please sign in again.' in message_texts(response)
 
 
 class TestCredentialAdmin:

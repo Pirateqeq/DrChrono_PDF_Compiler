@@ -170,7 +170,7 @@ Applies to every step:
 1. **Services**: rewrite `services.py` and slim `exceptions.py`. Update `verify/tests.py` service tests: refresh margin, lock re-check, refresh keeps old refresh token, failures raise `DrChronoAuthError`, compatibility wrapper.
 
    *Simplicity check:*
-   - `services.py` ≤ 80 lines; `exceptions.py` ≤ 6 lines.
+   - `services.py` ≤ 90 lines including blank lines (raised from 80 after step 1: what remained was all real logic); `exceptions.py` ≤ 6 lines.
    - One HTTP call site for `/o/token/` (`request_token`) and one place tokens are written (`save_token`); `grep -n "access_token =" verify/` shows only `save_token`.
    - `get_access_token` reads top to bottom with at most two levels of nesting; the lock only exists on the refresh path.
    - Client credentials added in exactly one place (`request_token`), not by each caller.
