@@ -355,11 +355,22 @@ class TestCsrfFailure:
 
 
 class TestCredentialAdmin:
-    def test_admin_list_shows_credentials(self, client, credential):
-        admin = User.objects.create_superuser('admin', 'admin@example.test', 'pw')
-        client.force_login(admin)
+    @pytest.fixture
+    def admin_client(self, client, credential):
+        client.force_login(User.objects.create_superuser('admin', 'admin@example.test', 'pw'))
+        return client
 
-        response = client.get(reverse('admin:verify_drchronocredential_changelist'))
+    def test_list_shows_credentials(self, admin_client):
+        response = admin_client.get(reverse('admin:verify_drchronocredential_changelist'))
 
         assert response.status_code == 200
         assert b'drjane' in response.content
+
+    def test_edit_form_hides_tokens(self, admin_client, credential):
+        response = admin_client.get(reverse('admin:verify_drchronocredential_change', args=[credential.pk]))
+
+        html = response.content.decode()
+        assert response.status_code == 200
+        assert 'valid-access-token' not in html and 'valid-refresh-token' not in html
+        assert 'name="access_token"' not in html and 'name="refresh_token"' not in html
+        assert 'name="scope"' in html
