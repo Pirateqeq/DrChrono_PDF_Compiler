@@ -6,6 +6,7 @@ from django.contrib.auth import login
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from django.shortcuts import redirect, render
+from django.views.decorators.http import require_POST
 
 from . import services
 from .exceptions import DrChronoAuthError
@@ -46,6 +47,13 @@ def oauth_callback(request):
     login(request, user)
     messages.success(request, f'Successfully connected as {username}')
     return redirect('search_app:search')
+
+
+@require_POST
+def sign_out(request):
+    """Log out here, then finish on DrChrono's own logout page (it needs a click on its Log out button)."""
+    services.sign_out(request)
+    return redirect(services.DRCHRONO_LOGOUT_URL)
 
 
 def csrf_failure(request, reason=''):

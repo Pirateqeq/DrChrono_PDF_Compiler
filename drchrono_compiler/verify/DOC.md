@@ -27,6 +27,19 @@ Every failure goes through `services.back_to_sign_in`, which sets an error messa
 | CSRF check fails anywhere in the site (`csrf_failure`, set as `CSRF_FAILURE_VIEW`) | "Your session has expired, please sign in again." |
 | Token can't be refreshed on a protected page (`require_auth`) | "Your DrChrono session expired, please sign in again." |
 
+## Log out
+
+The navbar (`templates/layout.html`) shows a **Log out** button while signed in. It POSTs to **`/logout/` (`sign_out`)**, which:
+
+1. Revokes the app's DrChrono access at `/o/revoke_token/` with the refresh token (revoking it also revokes the access token issued with it). This is best effort: if DrChrono is unreachable or replies with an error, logging out still continues.
+2. Deletes the stored `DrChronoCredential`.
+3. Ends the Django session.
+4. Redirects to the practice's DrChrono logout page (`DRCHRONO_LOGOUT_URL`, `https://drkurokawa.drchrono.com/accounts/logout/`).
+
+Step 4 exists because staff already sign out through DrChrono, and because signing out of this app alone would leave DrChrono signed in: anyone at the same browser could click "Sign in with DrChrono" and get straight back in. The app can't sign anyone out of DrChrono itself; DrChrono's logout page only completes when the user clicks its own Log out button (a CSRF-protected form), so the user finishes there with one click.
+
+The view only accepts POST, so another site can't log people out with a link or image. Signing out of DrChrono separately never ends this app's session (Django's session lasts up to 2 weeks).
+
 ## Tokens and refresh
 
 DrChrono access tokens last 48 hours. One PDF build makes many API calls, so a token that expires midway would break it.
@@ -48,7 +61,10 @@ All requests go through `_call`, which adds a 10-second timeout and turns any `r
 | Function | DrChrono endpoint | Notes |
 |---|---|---|
 | `authorize_url(state)` | `/o/authorize/` | Builds the URL only; no request. Sends client ID, redirect URI, scopes and `state`. |
-| `request_token(**data)` | `POST /o/token/` | Code exchange or refresh. Adds `client_id` and `client_secret` in this one place. |
+| `request_token(**data)` | `POST /o/token/` | Code exchange or refresh. |
+| `sign_out(request)` | `POST /o/revoke_token/` | Revokes the refresh token (best effort), deletes the credential, ends the session. |
+
+`request_token` and `sign_out` both send `client_id` and `client_secret` through `_client_post`, the one place the client credentials are added.
 | `fetch_current_user(access_token)` | `GET /api/users/current` | DrChrono redirects this to `/api/users/{id}`; `requests` follows it with the same header. |
 
 Settings used: `DRCHRONO_CLIENT_ID`, `DRCHRONO_CLIENT_SECRET`, `DRCHRONO_REDIRECT_URI`, `DRCHRONO_SCOPES` (all from environment variables). The DrChrono base URL is a constant in `services.py`.

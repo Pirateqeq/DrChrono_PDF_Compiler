@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 import requests
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import logout
 from django.db import transaction
 from django.shortcuts import redirect
 from django.utils import timezone
@@ -13,6 +14,8 @@ from .exceptions import DrChronoAuthError
 from .models import DrChronoCredential
 
 DRCHRONO = 'https://app.drchrono.com'
+# The practice's own DrChrono address, where staff sign in and out of DrChrono itself.
+DRCHRONO_LOGOUT_URL = 'https://drkurokawa.drchrono.com/accounts/logout/'
 
 
 def authorize_url(state):
@@ -30,10 +33,14 @@ def _call(method, path, **kwargs):
         raise DrChronoAuthError(f'DrChrono request failed: {e}') from e
 
 
+def _client_post(path, data):
+    client = {'client_id': settings.DRCHRONO_CLIENT_ID, 'client_secret': settings.DRCHRONO_CLIENT_SECRET}
+    return _call('POST', path, data=data | client)
+
+
 def request_token(**data):
     """Code exchange or refresh at /o/token/."""
-    client = {'client_id': settings.DRCHRONO_CLIENT_ID, 'client_secret': settings.DRCHRONO_CLIENT_SECRET}
-    return _call('POST', '/o/token/', data=data | client)
+    return _client_post('/o/token/', data)
 
 
 def fetch_current_user(access_token):
@@ -78,6 +85,19 @@ def require_auth(view):
             return back_to_sign_in(request, 'Your DrChrono session expired, please sign in again.')
         return view(request, *args, **kwargs)
     return wrapper
+
+
+def sign_out(request):
+    """Revoke the app's DrChrono access, delete the stored tokens and end the session."""
+    cred = DrChronoCredential.objects.filter(user=request.user).first() if request.user.is_authenticated else None
+    if cred:
+        try:
+            # Revoking the refresh token also revokes the access token issued with it.
+            _client_post('/o/revoke_token/', {'token': cred.refresh_token or cred.access_token})
+        except DrChronoAuthError:
+            pass  # best effort (an empty-body success also lands here); the tokens are deleted below either way
+        cred.delete()
+    logout(request)
 
 
 def back_to_sign_in(request, message):
