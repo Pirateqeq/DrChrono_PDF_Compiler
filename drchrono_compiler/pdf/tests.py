@@ -23,8 +23,8 @@ from pdf.golden import (
     GOLDEN_VISIT,
     record_drawing,
 )
-from pdf import hcfa
-from pdf.services import generate_balance_report, generate_clinical_notes
+from pdf import balance, hcfa
+from pdf.services import generate_clinical_notes
 
 GENERATE_URL = reverse('pdf_app:generate_selected', kwargs={'patient_id': 101})
 LIST_URL = reverse('appts_app:historical_list', kwargs={'patient_id': 101})
@@ -76,15 +76,9 @@ class TestGoldenOutput:
         drawn = record_drawing(lambda: hcfa.claim_forms(make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES))
         assert drawn == CLAIM_FORM_GOLDEN
 
-    def test_balance_report_text_unchanged(self, drchrono):
-        items = {}
-        for item in GOLDEN_BALANCE_ITEMS:
-            items.setdefault(item['appointment'], []).append(item)
-        drchrono.routes['/api/appointments'] = fake_response({'results': GOLDEN_BALANCE_VISITS, 'next': None})
-        for appt_id, appt_items in items.items():
-            drchrono.routes[f'/api/line_items?appointment={appt_id}'] = fake_response({'results': appt_items, 'next': None})
-
-        assert pdf_text(generate_balance_report(101, 'tok'))[0] == BALANCE_REPORT_GOLDEN
+    def test_balance_report_text_unchanged(self):
+        report = balance.balance_report(make_patient(), GOLDEN_BALANCE_VISITS, by_visit(GOLDEN_BALANCE_ITEMS))
+        assert pdf_text(report)[0] == BALANCE_REPORT_GOLDEN
 
 
 # ── hcfa ──────────────────────────────────────────────────────────────────────
@@ -160,33 +154,41 @@ class TestMissingDetails:
 
 # ── generate_balance_report ───────────────────────────────────────────────────
 
-class TestGenerateBalanceReport:
-    def test_totals_unpaid_line_items(self, drchrono):
-        text = pdf_text(generate_balance_report(101, 'tok'))[0]
+def by_visit(items):
+    grouped = {}
+    for item in items:
+        grouped.setdefault(item['appointment'], []).append(item)
+    return grouped
 
-        assert 'Patient Account Balance' in text
-        assert 'Provider: Springfield Chiropractic' in text
-        assert 'Patient: Doe, Jane' in text
-        assert '$225.50' in text
-        assert '99213' in text and '98940' in text
-        assert '97140' not in text
-        assert drchrono.calls[0]['headers'] == {'Authorization': 'Bearer tok'}
 
-    def test_newest_line_items_first(self, drchrono):
-        text = pdf_text(generate_balance_report(101, 'tok'))[0]
+class TestBalanceReport:
+    def report_text(self, visits=GOLDEN_BALANCE_VISITS, items=GOLDEN_BALANCE_ITEMS):
+        return pdf_text(balance.balance_report(make_patient(), visits, by_visit(items)))[0]
+
+    def test_totals_unpaid_charges_and_skips_paid_ones(self):
+        text = self.report_text()
+
+        assert 'Patient: Doe, Jane' in text and 'Provider: Springfield Chiropractic' in text
+        assert '$396.00' in text  # 150 + 45 + 60 + 40 + 25.50 + 75.50
+        assert '97750' not in text  # balance 0.00
+
+    def test_newest_charges_first(self):
+        text = self.report_text()
         assert text.index('May 20, 2025') < text.index('Mar 10, 2025')
 
-    def test_no_balance_due(self, drchrono):
-        drchrono.routes['/api/appointments'] = fake_response({'results': []})
-
-        text = pdf_text(generate_balance_report(101, 'tok'))[0]
+    def test_no_balance_due(self):
+        text = self.report_text(items=[])
 
         assert '$0.00' in text
         assert 'No billable transactions found.' in text
 
-    def test_default_provider_name(self, drchrono, monkeypatch):
+    def test_default_provider_name(self, monkeypatch):
         monkeypatch.delenv('PROVIDER_NAME')
-        assert 'Provider: Unknown Provider' in pdf_text(generate_balance_report(101, 'tok'))[0]
+        assert 'Provider: Unknown Provider' in self.report_text()
+
+    def test_zero_written_differently_counts_as_paid(self):
+        items = [make_line_item(1, '99213', '150.00', balance_total='0')]
+        assert 'No billable transactions found.' in self.report_text(items=items)
 
 
 # ── generate_clinical_notes ───────────────────────────────────────────────────
