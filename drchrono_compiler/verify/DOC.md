@@ -25,7 +25,7 @@ Every failure goes through `services.back_to_sign_in`, which sets an error messa
 | `state` missing, wrong, or callback opened directly | "Sign-in expired, please try again." |
 | Token exchange or user lookup fails (network, HTTP error, unexpected reply) | "Couldn't sign in to DrChrono, please try again." |
 | CSRF check fails anywhere in the site (`csrf_failure`, set as `CSRF_FAILURE_VIEW`) | "Your session has expired, please sign in again." |
-| Token can't be refreshed on a protected page (`require_auth`) | "Your DrChrono session expired, please sign in again." |
+| Token can't be refreshed, or DrChrono rejects it (401) during a page (`require_auth`) | "Your DrChrono session expired, please sign in again." |
 
 ## Log out
 
@@ -50,7 +50,7 @@ DrChrono access tokens last 48 hours. One PDF build makes many API calls, so a t
   3. Otherwise posts the refresh token to `/o/token/` and saves the result.
 
   The lock matters because a refresh token may be single-use: two tabs refreshing at once could otherwise invalidate each other and log the user out.
-- **`require_auth`** wraps every protected view. Signed-out users go to `/`. Otherwise it calls `get_access_token`, puts the token on `request.drchrono_token` (where `search`, `appts` and `pdf` read it for [`core.drchrono`](../core/DOC.md)), and runs the view, or returns to `/` with the "session expired" message if the refresh fails. Class-based views use it through `method_decorator(require_auth, name='dispatch')`.
+- **`require_auth`** wraps every protected view. Signed-out users go to `/`. Otherwise it calls `get_access_token`, puts the token on `request.drchrono_token` (where `search`, `appts` and `pdf` read it for [`core.drchrono`](../core/DOC.md)), and runs the view. It returns to `/` with the "session expired" message if the refresh fails, **or if the view raises `DrChronoError` with status 401** (DrChrono rejected the token mid-session); views re-raise a 401 and report any other status themselves. Other errors pass through. Class-based views use it through `method_decorator(require_auth, name='dispatch')`.
 
 ## DrChrono calls (`services.py`)
 
@@ -73,7 +73,7 @@ Rate limit: DrChrono allows 500 calls per hour per app. A sign-in costs 2 calls 
 
 - **`DrChronoCredential`** (`models.py`) — One per user (`user.drchrono_cred`): `access_token`, `refresh_token`, `expires_at`, `scope`, `created_at`, `updated_at`. `needs_refresh` (missing `expires_at`, or less than 5 minutes left) is the single expiry rule: `get_access_token` uses it and the admin list shows it.
 - **Admin** (`admin.py`) — Lists user, created, expiry and expired status. The edit form excludes both tokens, so live credentials are never displayed or edited there.
-- **`DrChronoAuthError`** (`exceptions.py`) — Raised for every DrChrono sign-in or token failure. `.message` returns the text (used by `search`).
+- **`DrChronoAuthError`** (`exceptions.py`) — Raised for every DrChrono sign-in or token failure.
 
 ## Local development
 

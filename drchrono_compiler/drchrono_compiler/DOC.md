@@ -6,6 +6,7 @@ Settings and routing for the [DrChrono PDF Compiler](../../README.md). No busine
 
 - Secrets, database, and DrChrono client settings come from env vars (see the [README](../../README.md#environment-variables)). `load_dotenv` reads `drchrono_compiler/.env` first for local runs; real env vars win. DrChrono's auth/token/revoke URLs are hardcoded.
 - `ALLOWED_HOSTS` is the Render domain, plus `localhost` / `127.0.0.1` when `DEBUG` is on. `CSRF_TRUSTED_ORIGINS` is the Render domain only.
+- `SESSION_COOKIE_AGE` is 12 hours (Django's default is 2 weeks), so forgotten sign-ins on shared computers and the session's patient search results expire within a clinic day.
 - When `DEBUG` is off: HTTPS redirect, secure session/CSRF cookies. HSTS (1 year, subdomains, preload) is always set. `SECURE_PROXY_SSL_HEADER` trusts Render's `X-Forwarded-Proto`.
 - `WhiteNoiseMiddleware` serves static files directly from gunicorn.
 - `CSRF_FAILURE_VIEW` = [`verify.views.csrf_failure`](../verify/DOC.md): a CSRF failure sends the user back to log in instead of a 403.

@@ -10,7 +10,7 @@ How the [DrChrono PDF Compiler](README.md) fits together: what the user does, wh
 | 2 | `/oauth/callback` (`verify`) | Signs in to DrChrono, allows access | Checks `state`, exchanges code for tokens, saves them to a passwordless local user | "Successfully connected as …", search page |
 | 3 | `/search/` (`search`) | Enters first name, last name and/or DOB, clicks **Search Patients** | Calls `/api/patients_summary`, stores results in session | "Found N matching patient(s)." |
 | 4 | `/search/results/` (`search`) | Clicks **Select & View Appointments** | Loads every past, attended visit scheduled in the last 3 years with a clinical note PDF | Patient cards (name, DOB, chart ID) |
-| 5 | `/appts/patient/<id>_<name>/historical/` (`appts`) | Unticks unwanted visits, clicks **Generate PDF Report for Selected** | — | Visits newest first, all ticked |
+| 5 | `/appts/patient/<id>/` (`appts`) | Unticks unwanted visits, clicks **Generate PDF Report for Selected** | — | Visits newest first, all ticked |
 | 6 | `POST /pdf/patient/<id>/generate-selected/` (`pdf`) | Waits | Fetches data, draws forms, merges | Download `Patient_<First>_<Last>_REPORT.pdf`, or back to step 5 with errors |
 | 7 | `POST /logout/` (`verify`) | Clicks **Log out** in the navbar | Revokes the app's DrChrono access, deletes stored tokens, ends the session (DrChrono itself stays signed in) | Sign-in page: "You're signed out." |
 
@@ -130,6 +130,8 @@ HCFA-1500 box sources:
 | CSRF failure (stale session) | Sign-in page: "Your session has expired, please sign in again." |
 | Empty search form | "Please provide at least one of: First Name, Last Name, or Date Of Birth" |
 | No matches | "No patients found matching your criteria." |
-| DrChrono search error | "A client error / server error occurred while searching patients." |
+| DrChrono error on search or the appointment list | A plain message, e.g. "DrChrono isn't responding. Try again in a moment." or "DrChrono's hourly request limit was reached…" |
+| DrChrono rejects the token mid-session (401) | Sign-in page: "Your DrChrono session expired, please sign in again." |
+| More than 50 search matches | "DrChrono found more than 50 matches. Add details to narrow the search." |
 | Visits can't load | "Failed to load appointments: …", empty list |
 | Patient data missing for HCFA | "PDF generation failed." plus missing fields, back on visit list |
