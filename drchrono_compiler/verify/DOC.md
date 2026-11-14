@@ -17,7 +17,7 @@ The flow uses plain `requests` calls, following DrChrono's own documented exampl
    6. Gets or creates a Django `User` with that username. New users get an unusable password: DrChrono is the only way in.
    7. Saves the tokens (always, including for a user who is already signed in) and logs the user in.
 
-Every failure goes through `_back_to_sign_in`, which sets an error message and returns to `/`:
+Every failure goes through `services.back_to_sign_in`, which sets an error message and returns to `/` (the views and `require_auth` share it):
 
 | Situation | Message on the sign-in page |
 |---|---|
@@ -32,14 +32,14 @@ Every failure goes through `_back_to_sign_in`, which sets an error message and r
 DrChrono access tokens last 48 hours. One PDF build makes many API calls, so a token that expires midway would break it.
 
 - **`save_token(user, token)`** is the only place tokens are written. It stores the access token, the refresh token, `expires_at` (now + `expires_in`) and `scope`. The docs don't say whether a refresh returns a new refresh token, so the old one is kept when none comes back.
-- **`get_access_token(user)`** returns the stored access token while more than 5 minutes are left. Otherwise it refreshes:
+- **`get_access_token(user)`** returns the stored access token unless `DrChronoCredential.needs_refresh` says less than 5 minutes are left. Otherwise it refreshes:
   1. Opens a transaction and locks the credential row (`select_for_update`).
   2. Re-checks the expiry, because another request may have refreshed it while this one waited. If so, it returns that token.
   3. Otherwise posts the refresh token to `/o/token/` and saves the result.
 
   The lock matters because a refresh token may be single-use: two tabs refreshing at once could otherwise invalidate each other and log the user out.
 - **`require_auth`** wraps every protected view. Signed-out users go to `/`. Otherwise it calls `get_access_token`, puts the token on `request.drchrono_token`, and runs the view, or returns to `/` with the "session expired" message if the refresh fails. Class-based views use it through `method_decorator(require_auth, name='dispatch')`.
-- **`get_valid_access_token(request)`** is kept so `search`, `appts` and `pdf` keep working; they can switch to `request.drchrono_token`.
+- **`get_valid_access_token(request)`** is kept so `search`, `appts` and `pdf` keep working. It returns `request.drchrono_token` when `require_auth` already set it, so those apps don't add a second database query; they can switch to reading the attribute directly.
 
 ## DrChrono calls (`services.py`)
 
@@ -57,7 +57,7 @@ Rate limit: DrChrono allows 500 calls per hour per app. A sign-in costs 2 calls 
 
 ## Models, admin, errors
 
-- **`DrChronoCredential`** (`models.py`) — One per user (`user.drchrono_cred`): `access_token`, `refresh_token`, `expires_at`, `scope`, `created_at`, `updated_at`. `is_expired` (missing or past `expires_at`) is shown in the admin list; refresh decisions use the 5-minute margin in `services.py` instead.
+- **`DrChronoCredential`** (`models.py`) — One per user (`user.drchrono_cred`): `access_token`, `refresh_token`, `expires_at`, `scope`, `created_at`, `updated_at`. `needs_refresh` (missing `expires_at`, or less than 5 minutes left) is the single expiry rule: `get_access_token` uses it and the admin list shows it.
 - **Admin** (`admin.py`) — Lists user, created, expiry and expired status. The edit form excludes both tokens, so live credentials are never displayed or edited there.
 - **`DrChronoAuthError`** (`exceptions.py`) — Raised for every DrChrono sign-in or token failure. `.message` returns the text (used by `search`).
 
@@ -68,4 +68,4 @@ Rate limit: DrChrono allows 500 calls per hour per app. A sign-in costs 2 calls 
 
 ## Tests (`tests.py`)
 
-Every DrChrono call in `verify` goes through `requests.request`, so tests patch `verify.services.requests.request`. The `drchrono_http` fixture answers with a token; `drchrono_login` answers both the token exchange and the user lookup. `sign_in(client)` starts at `/authorize/` and returns to the callback with the saved `state`.
+Every DrChrono call in `verify` goes through `requests.request`, so tests patch `verify.services.requests.request`. The `drchrono_http` fixture answers with a token (`NEW_TOKEN`); `drchrono_login` builds on it to answer both the token exchange (POST) and the user lookup (GET). The admin tests use pytest-django's built-in `admin_client`. `sign_in(client)` starts at `/authorize/` and returns to the callback with the saved `state`.

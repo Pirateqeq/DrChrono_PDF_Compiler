@@ -51,21 +51,16 @@ def save_token(user, token):
     return cred
 
 
-def _needs_refresh(cred):
-    # 5-minute margin so a token can't expire partway through a multi-call PDF build.
-    return cred.expires_at is None or cred.expires_at - timedelta(minutes=5) <= timezone.now()
-
-
 def get_access_token(user):
     cred = DrChronoCredential.objects.filter(user=user).first()
     if cred is None:
         raise DrChronoAuthError('Not connected to DrChrono')
-    if not _needs_refresh(cred):
+    if not cred.needs_refresh:
         return cred.access_token
     with transaction.atomic():
         # Lock so two requests can't both spend the same refresh token.
         cred = DrChronoCredential.objects.select_for_update().get(pk=cred.pk)
-        if not _needs_refresh(cred):  # another request refreshed it while we waited
+        if not cred.needs_refresh:  # another request refreshed it while we waited
             return cred.access_token
         token = request_token(grant_type='refresh_token', refresh_token=cred.refresh_token)
         return save_token(user, token).access_token
@@ -80,11 +75,16 @@ def require_auth(view):
         try:
             request.drchrono_token = get_access_token(request.user)
         except DrChronoAuthError:
-            messages.warning(request, 'Your DrChrono session expired, please sign in again.')
-            return redirect('verify_app:connect_drchrono')
+            return back_to_sign_in(request, 'Your DrChrono session expired, please sign in again.')
         return view(request, *args, **kwargs)
     return wrapper
 
 
+def back_to_sign_in(request, message):
+    messages.error(request, message)
+    return redirect('verify_app:connect_drchrono')
+
+
 def get_valid_access_token(request):
-    return get_access_token(request.user)  # kept for search/appts/pdf until they use request.drchrono_token
+    # Kept for search/appts/pdf until they read request.drchrono_token; reuses it to skip a second query.
+    return getattr(request, 'drchrono_token', None) or get_access_token(request.user)

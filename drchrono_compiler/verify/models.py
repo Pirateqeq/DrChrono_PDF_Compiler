@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib.auth.models import User
 from django.db import models
 from django.utils import timezone
@@ -13,5 +15,6 @@ class DrChronoCredential(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     @property
-    def is_expired(self):
-        return self.expires_at is None or timezone.now() >= self.expires_at
+    def needs_refresh(self):
+        # 5-minute margin so a token can't expire partway through a multi-call PDF build.
+        return self.expires_at is None or self.expires_at - timedelta(minutes=5) <= timezone.now()
