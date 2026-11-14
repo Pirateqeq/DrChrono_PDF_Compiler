@@ -200,7 +200,7 @@ Applies to every step:
 5. **Docs**: `verify/DOC.md`, `README.md` (local setup without `OAUTHLIB_INSECURE_TRANSPORT`), `SYSTEM_MAP.md` (journey steps 1–2, diagram labels), `CLAUDE.md` (auth section, local env).
 
    *Simplicity check:*
-   - `verify/DOC.md` is shorter than or equal to today's; one bullet per function, no restating of code.
+   - `verify/DOC.md` length matches the app's complexity (no line limit): explains behaviour and the reasons behind it, without restating the code line by line.
    - No doc describes behaviour that the code doesn't have (search each doc for `OAuth2Session`, `oauth_state` handling, "redirects to DrChrono" at `/`).
 
 6. **Manual check (local)**: sign in; cancel on DrChrono; visit `/` while signed in; set `expires_at` in the past via admin or shell and load a page (refresh happens silently); delete the credential and load a page (back to sign-in with a message).
