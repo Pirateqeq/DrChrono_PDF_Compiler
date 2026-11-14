@@ -157,20 +157,67 @@ flowchart TD
 
 ## Implementation steps
 
-Each step ends with `pytest` passing for what it touches.
+Each step ends with `pytest` passing for what it touches, then its **simplicity check**. A step isn't done until every check holds; if one fails, simplify before moving on rather than noting it for later.
+
+Applies to every step:
+- No class where a function will do; no base classes, mixins, managers or registries for one use.
+- No wrapper that only renames or passes through to another function (the `get_valid_access_token` compatibility wrapper is the one allowed exception, and it is one line).
+- No settings, constants or parameters for values that never change or are used once.
+- No `try`/`except` that catches broader than needed, re-raises unchanged, or exists only to log.
+- No dead code, commented-out code, `print` debugging or `PRINT_ERRORS` flags.
+- Comments explain *why*, never restate the code; docstrings are one line.
 
 1. **Services**: rewrite `services.py` and slim `exceptions.py`. Update `verify/tests.py` service tests: refresh margin, lock re-check, refresh keeps old refresh token, failures raise `DrChronoAuthError`, compatibility wrapper.
+
+   *Simplicity check:*
+   - `services.py` ≤ 80 lines; `exceptions.py` ≤ 6 lines.
+   - One HTTP call site for `/o/token/` (`request_token`) and one place tokens are written (`save_token`); `grep -n "access_token =" verify/` shows only `save_token`.
+   - `get_access_token` reads top to bottom with at most two levels of nesting; the lock only exists on the refresh path.
+   - Client credentials added in exactly one place (`request_token`), not by each caller.
+   - Error handling: each function catches `requests.RequestException` (or the specific `KeyError` on a bad response) once and raises `DrChronoAuthError`; no status-code branching unless behaviour differs.
+
 2. **Views, template, URLs**: new `connect_drchrono` page, `authorize`, rewritten `oauth_callback`, `connect.html`, `/authorize/` route. Update callback tests to patch `verify.services.requests` instead of `OAuth2Session`; add tests for cancel, state mismatch, network error, signed-in user at `/`. The two known-bug tests (login loop, unusable password) must pass.
+
+   *Simplicity check:*
+   - `views.py` ≤ 60 lines; plain function views, no class-based views or forms.
+   - `oauth_callback` has one failure path: every failure sets a message and returns `redirect('verify_app:connect_drchrono')`; no duplicated redirect/message code per branch (use early returns or one shared helper at most).
+   - Views contain no HTTP or token logic; they only call `services`.
+   - `connect.html` ≤ 20 lines, extends `layout.html`, inline styles match the existing pages, no new CSS file or JavaScript.
+   - `urls.py` is three `path()` lines.
+
 3. **Admin**: exclude token fields; test the edit form doesn't contain them.
+
+   *Simplicity check:*
+   - `admin.py` ≤ 10 lines: `list_display`, `readonly_fields`, `exclude`. No custom forms, actions or methods.
+
 4. **Cleanup**: remove the two packages from `requirements.txt` (preserve UTF-16 LE + CRLF), remove the URL settings. Full suite: only the 4 non-`verify` known-bug tests may fail.
+
+   *Simplicity check:*
+   - `grep -rn "oauthlib\|OAuth2Session\|DRCHRONO_AUTH_URL\|DRCHRONO_TOKEN_URL\|DRCHRONO_REVOKE_URL" .` returns nothing.
+   - No leftover imports or unused functions in `verify/` (check each `import` is used; every function in `services.py` has a caller).
+   - `verify/` app code (excluding tests and migrations) is smaller than before (205 lines today), even with the new template.
+
 5. **Docs**: `verify/DOC.md`, `README.md` (local setup without `OAUTHLIB_INSECURE_TRANSPORT`), `SYSTEM_MAP.md` (journey steps 1–2, diagram labels), `CLAUDE.md` (auth section, local env).
+
+   *Simplicity check:*
+   - `verify/DOC.md` is shorter than or equal to today's; one bullet per function, no restating of code.
+   - No doc describes behaviour that the code doesn't have (search each doc for `OAuth2Session`, `oauth_state` handling, "redirects to DrChrono" at `/`).
+
 6. **Manual check (local)**: sign in; cancel on DrChrono; visit `/` while signed in; set `expires_at` in the past via admin or shell and load a page (refresh happens silently); delete the credential and load a page (back to sign-in with a message).
+
+   *Simplicity check:*
+   - Read `services.py` and `views.py` top to bottom once more. Anything that needs a second read to understand gets simplified or a one-line *why* comment.
+
 7. **Merge**: PR to `main`. No Render env changes needed; `DRCHRONO_REDIRECT_URI` stays the same.
+
+   *Simplicity check:*
+   - Review the full PR diff with `/simplify` (reuse, simplification, efficiency) and apply anything it finds before merging.
 
 ## Done when
 
 - All `verify` tests pass, including the two known-bug tests; other apps' tests unchanged.
 - No `requests_oauthlib` / `oauthlib` imports remain.
+- Every step's simplicity check holds; `verify/` app code is under 205 lines.
 - Local manual check (step 6) passes.
 
 ## Optional extras (not in scope until chosen)
