@@ -50,6 +50,7 @@ Apps under `drchrono_compiler/`, all mounted in `drchrono_compiler/urls.py` with
 
 ## Gotchas
 
+- DrChrono ID types differ: an appointment's `id` is a string ("usually numeric, but not always"), while a line item's `appointment` is an integer. Compare visit IDs as text (`pdf.packet.by_visit` does). Test data in `pdf/tests.py` uses these real types; keep fakes realistic when adding tests.
 - `requirements.txt` is UTF-16 LE with CRLF line endings. Edit it with code that preserves that encoding; `requirements-dev.txt` is plain UTF-8 and includes it with `-r`.
 - Claim-form coordinates in `pdf/hcfa.py` only match `pdf/forms/HCFA.pdf`; replacing the template means re-deriving them and regenerating `pdf/golden.py`.
 - `STATICFILES_STORAGE` in settings is ignored by Django 5.2 (use `STORAGES` if static storage matters).

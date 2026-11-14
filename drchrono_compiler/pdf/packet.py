@@ -39,10 +39,14 @@ def load(token, patient_id, selected_ids):
 
 
 def by_visit(line_items):
-    """Line items grouped by visit ID (missing visits give an empty list)."""
+    """Line items grouped by visit ID as text (missing visits give an empty list).
+
+    DrChrono sends a visit's own `id` as text but a line item's `appointment` as a number, so both
+    sides are compared as text: look visits up with `str(visit['id'])`.
+    """
     grouped = defaultdict(list)
     for item in line_items:
-        grouped[item['appointment']].append(item)
+        grouped[str(item['appointment'])].append(item)
     return grouped
 
 
@@ -61,7 +65,7 @@ def build(packet):
         except NoteError as e:
             problems.append(f'{when} clinical note: {e}')
         try:
-            parts.extend(hcfa.claim_forms(packet['patient'], visit, packet['line_items'][visit['id']]))
+            parts.extend(hcfa.claim_forms(packet['patient'], visit, packet['line_items'][str(visit['id'])]))
         except hcfa.ClaimError as e:
             problems.append(f'{when} claim form: {e}')
     if problems:

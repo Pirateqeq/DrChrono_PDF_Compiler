@@ -28,9 +28,9 @@ TABLE_STYLE = TableStyle([
 
 
 def balance_report(patient, appointments, line_items):
-    """PDF bytes. `line_items` maps each visit ID to that visit's line items."""
+    """PDF bytes. `line_items` maps each visit ID, as text, to that visit's line items (see packet.by_visit)."""
     name = f"{patient.get('last_name')}, {patient.get('first_name')}"
-    unpaid = [(item, appt) for appt in appointments for item in line_items.get(appt['id'], [])
+    unpaid = [(item, appt) for appt in appointments for item in line_items.get(str(appt['id']), [])
               if Decimal(item['balance_total']) != 0]
     unpaid.sort(key=lambda pair: pair[0]['service_date'], reverse=True)
     total = sum((Decimal(item['balance_total']) for item, _ in unpaid), Decimal('0.00'))

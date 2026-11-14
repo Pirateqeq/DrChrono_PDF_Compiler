@@ -46,7 +46,7 @@ No `except Exception` anywhere: each handler catches a specific error type.
 
 - **`load`**, **`build`**: as above. `load` returns a dict: `patient`, `appointments` (all eligible), `selected` (ticked, oldest first), `line_items` (visit ID → list).
 - **`download_note(visit)`**: downloads the note's PDF (URL from [`drchrono.note_pdf_url`](../core/DOC.md)) with [`drchrono.download`](../core/DOC.md). Raises `NoteError` when there's no URL, the download fails (a 401 from the file host counts as a broken link, not an expired sign-in), or the file isn't a readable PDF (checked here so a bad file never reaches the merge).
-- **`by_visit(line_items)`**: groups line items by visit ID; used by `load` and the tests.
+- **`by_visit(line_items)`**: groups line items by visit ID **as text**; used by `load`, `build`, the balance report and the tests. DrChrono sends a visit's `id` as text but a line item's `appointment` as a number, so comparing them as-is matches nothing (every visit looked like it had "no charges").
 
 ## balance.py
 

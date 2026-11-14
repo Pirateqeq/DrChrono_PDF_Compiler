@@ -39,7 +39,8 @@ def two_visits():
     """Visit 1 (older: one unpaid charge, one paid) and visit 2 (newer: one charge)."""
     return {
         'patient': make_patient(),
-        'appointments': [dict(visit) for visit in GOLDEN_BALANCE_VISITS],  # fresh copies: tests edit them
+        # As DrChrono sends them: a visit's id is text, a line item's appointment is a number.
+        'appointments': [dict(visit, id=str(visit['id'])) for visit in GOLDEN_BALANCE_VISITS],
         'line_items': [make_line_item(1, '99213', '150.00'), make_line_item(1, '97140', '40.00', balance_total='0.00'),
                        make_line_item(2, '98940', '75.50', service_date='2025-05-20')],
     }
@@ -213,8 +214,15 @@ class TestLoad:
         assert api_calls(drchrono) == [f'{DRCHRONO}/api/patients/101', f'{DRCHRONO}/api/appointments',
                                        f'{DRCHRONO}/api/line_items']
         assert drchrono.calls[2]['params'] == {'patient': 101}
-        assert [v['id'] for v in contents['selected']] == [1, 2]  # oldest first
-        assert sorted(contents['line_items']) == [1, 2]
+        assert [v['id'] for v in contents['selected']] == ['1', '2']  # oldest first
+        assert sorted(contents['line_items']) == ['1', '2']
+
+    def test_line_items_match_visits_despite_different_id_types(self, drchrono):
+        # DrChrono: appointment id is text ("1"), line item appointment is a number (1). The PDF once
+        # reported "no charges" for every visit because they were compared as-is.
+        contents = packet.load('tok', 101, ['1'])
+
+        assert [i['code'] for i in contents['line_items'][str(contents['selected'][0]['id'])]] == ['99213', '97140']
 
     def test_visit_not_on_the_patients_list_is_rejected(self, drchrono):
         with pytest.raises(packet.PacketError, match='visit list changed'):
