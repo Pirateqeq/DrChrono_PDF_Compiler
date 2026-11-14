@@ -117,9 +117,9 @@ Render terminates TLS; settings force HTTPS, secure cookies, and HSTS when `DEBU
 | `POST /o/token/` | Token exchange and refresh (`verify`) |
 | `POST /o/revoke_token/` | Revoke access on log out (`verify`) |
 | `GET /api/users/current` | Identify the user after login (`verify`) |
-| `GET /api/patients_summary` | Patient search (`search`) |
-| `GET /api/appointments` | Appointment history (`core`) |
+| `GET /api/patients_summary` | Patient search (`search`, through `core`) |
+| `GET /api/appointments` | Appointment history, every page (`core`) |
 | `GET /api/appointments/{id}` | Single appointment (`core`) |
-| `GET /api/line_items?appointment={id}` | Billing line items (`core`) |
+| `GET /api/line_items?appointment={id}` | Billing line items, every page (`core`) |
 | `GET /api/patients/{id}` | Patient demographics (`core`) |
 | Clinical note `pdf` URL | Clinical note download (`pdf`) |
