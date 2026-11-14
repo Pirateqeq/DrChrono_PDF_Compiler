@@ -32,7 +32,11 @@ I checked DrChrono's published API docs before designing the data flow. Three fi
 
 **1.1 — `page_size: 50` is making truncation worse, not better.** DrChrono's page size **defaults to 250** and the `page_size` parameter can only *lower* it. `core/services.py:31` sets it to 50; `search/services.py:25` defaults to 50 and caps at 200. Both are actively reducing what you get back. Removing the parameter from the appointments call is a one-line change that immediately quintuples the window ⚠ G16.
 
+> **Correction (Nov 2026):** the 250 default doesn't apply to `/api/appointments`: the docs cap it at 20 per page, and `verbose=true` limits it to 25 (another section says 50). Removing `page_size` doesn't widen the window; following `next` does. Handled by [`CORE_PLAN.md`](CORE_PLAN.md).
+
 **1.2 — `since` doesn't mean what the code assumes.** The docs define `since` as *"retrieves appointments updated after a given timestamp"* — last-modified, not appointment date. `get_valid_appointments` computes it from a 3-year lookback and treats it as a date filter. A five-year-old appointment edited last month appears; a three-year-old appointment never touched may not. For a date-bounded history query the correct parameter is `date_range`.
+
+> **Correction (Nov 2026):** `/api/appointments` also has `occurred_since`, which filters on scheduled time with no window cap, so §1.3's 190-day chunking isn't needed. [`CORE_PLAN.md`](CORE_PLAN.md) uses `occurred_since`.
 
 **1.3 — `date_range` is capped at 190 days unless flagged historical.** So a 3-year window needs either the historical flag or chunking into ~190-day segments. This is a real constraint on the pagination design in Phase 4 — verify the exact behaviour against your account before building.
 
@@ -130,7 +134,7 @@ This single change subsumes most of ⚠ G02–G08: those bugs stop being fatal e
 Non-negotiable and quick. You cannot safely redesign a system you can't diff or test.
 
 - Add `.gitattributes`, normalize line endings in one dedicated commit ⚠ G26 — otherwise every change below lands inside a 582-line whitespace diff.
-- Add `search/tests/__init__.py`, commit the directory, reconcile the two failures ⚠ G01 G19 G27.
+- Add `search/tests/__init__.py`, commit the directory, reconcile the two failures ⚠ G01 G19 G27. *(Nov 2026: `search/tests/` was removed; `search/tests.py` covers forms, services and views.)*
 - GitHub Actions running `manage.py test` and `check --deploy` on push ⚠ G30.
 - Tag the current commit `v1-production`.
 - Re-encode `requirements.txt` as UTF-8 ⚠ G28; drop the unused `uvicorn` ⚠ G29.
@@ -176,6 +180,8 @@ As designed in §3. Do this **after** Phase 0, never before — 522 lines with z
 **Ships:** identical output, roughly half the API calls, and failures that no longer discard the packet. **Rollback:** redeploy previous commit.
 
 ### Phase 4 — Data and request flow
+
+> **Status (Nov 2026):** the first bullet (pagination, page size, date filter) is planned in [`CORE_PLAN.md`](CORE_PLAN.md), which uses `occurred_since` instead of `date_range` chunking. The session and patient-name-in-URL items are still open.
 
 - A `paginate(url, params)` generator in `core` that follows `next` ⚠ G16; drop the `page_size` override (§1.1); switch to `date_range` with chunking (§1.2–1.3).
 - **Session stores appointment and patient ids only**, never records ⚠ G13. The results page re-fetches. Add `clearsessions` to the deploy.
