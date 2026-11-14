@@ -76,17 +76,20 @@ sequenceDiagram
     loop Each ticked visit, oldest first
         PDF->>DC: Download clinical note PDF
         PDF->>PDF: Claim form(s), 6 charges per form
-        PDF->>PDF: Skip and list anything that fails
+        PDF->>PDF: Note any part that can't be built
     end
-    PDF->>PDF: Merge ('Not included' page first if anything was skipped)
-    PDF-->>User: PDF download (Patient_First_Last_REPORT.pdf)
+    alt Any part couldn't be built
+        PDF-->>User: No PDF: back to the visit list with a notice listing each problem
+    else Everything built
+        PDF->>PDF: Merge all pages
+        PDF-->>User: PDF download (Patient_First_Last_REPORT.pdf)
+    end
 ```
 
 ## Output
 
 ```
 Patient_<First>_<Last>_REPORT.pdf
-├── Not included          only if something was skipped: what, and why
 ├── Balance report        provider, patient, total balance, unpaid line items
 ├── Visit A (oldest)
 │   ├── Clinical note     DrChrono's PDF, as is
@@ -135,4 +138,4 @@ HCFA-1500 box sources:
 | More than 50 search matches | "DrChrono found more than 50 matches. Add details to narrow the search." |
 | Visits can't load | "Failed to load appointments: …", empty list |
 | Patient or practice details every claim needs are missing | Back on the visit list: "Can't build claim forms: missing patient zip code." |
-| One visit's note or claim can't be built | PDF still downloads; a first "Not included" page lists what was skipped and why |
+| Any visit's note or claim can't be built | No PDF. Back on the visit list: "The PDF wasn't generated because these parts couldn't be built:" plus one line per problem, e.g. "Mar 10, 2025 clinical note: couldn't download it" |

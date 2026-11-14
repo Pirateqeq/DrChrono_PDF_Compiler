@@ -25,7 +25,7 @@ views.generate ──> packet.load ──> core.drchrono (about 3 calls)
 3. **`packet.build(packet)`** assembles the PDF:
    - **Balance report** (`balance.py`), covering all eligible visits, not just the ticked ones.
    - **For each ticked visit:** its clinical note (`download_note`), then its claim form(s) (`hcfa.claim_forms`).
-   - **Failures are skipped and listed.** A note that can't be included (`NoteError`) or a claim that can't be built (`ClaimError`) is left out, and a first page titled **"Not included"** lists each one, for example "Mar 10, 2025 clinical note: couldn't download it".
+   - **All or nothing.** Every note (`NoteError`) and claim (`ClaimError`) problem across all ticked visits is collected. If there are any, **no PDF is generated**: the user returns to the visit list with a notice, "The PDF wasn't generated because these parts couldn't be built:", followed by one line per problem (for example "Mar 10, 2025 clinical note: couldn't download it", "May 20, 2025 claim form: no charges"). Listing all of them at once means they can be fixed together before trying again.
 4. The view returns the PDF as `Patient_<First>_<Last>_REPORT.pdf` via Django's `FileResponse`, which quotes and encodes the name so quotes or accents can't break the download header.
 
 **Cost:** about 3 DrChrono calls (plus one per extra page of visits or line items), plus one note download per ticked visit. All go through `core.drchrono.session`, so connections are reused.
@@ -38,7 +38,7 @@ views.generate ──> packet.load ──> core.drchrono (about 3 calls)
 | `PacketError`: ticked visit not on the patient's list, or details every claim needs are missing | Back to the list with that message |
 | `DrChronoError` (DrChrono down, rate limit, 404…) | Back to the list with [`core.drchrono.user_message`](../core/DOC.md) |
 | DrChrono rejects the token (401) | `DrChronoAuthError` reaches `require_auth`: sign-in page |
-| One visit's note or claim can't be built | PDF still downloads; listed on the "Not included" page |
+| Any visit's note or claim can't be built | No PDF; back to the list with the notice listing every problem and why |
 
 No `except Exception` anywhere: each handler catches a specific error type.
 
@@ -85,4 +85,4 @@ The blank HCFA-1500 template, opened by an absolute path built from `Path(__file
 ## Tests (`tests.py`, `golden.py`)
 
 - **Golden output**: `golden.py` holds what the pre-overhaul code drew for a 5-charge visit (every `drawString` x, y and text) and the balance report's text. The tests require the new code to produce exactly the same. To change the layout on purpose, regenerate them as `golden.py` explains.
-- **DrChrono and note files**: faked with `FakeDrChrono` patched on `core.drchrono.session.get`. Tests cover the 3-call fetch, the visit check, missing details, the ICD-10 fallback, page order, skip-and-list, extra forms past 6 charges, plain messages, and 401 → sign-in.
+- **DrChrono and note files**: faked with `FakeDrChrono` patched on `core.drchrono.session.get`. Tests cover the 3-call fetch, the visit check, missing details, the ICD-10 fallback, page order, all-or-nothing notices, extra forms past 6 charges, plain messages, and 401 → sign-in.

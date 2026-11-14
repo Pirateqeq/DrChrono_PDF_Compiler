@@ -23,7 +23,8 @@ def generate(request, patient_id):
         contents = packet.load(request.drchrono_token, patient_id, selected_ids)
         pdf = packet.build(contents)
     except packet.PacketError as e:
-        messages.error(request, str(e))
+        for line in e.args:
+            messages.error(request, line)
     except DrChronoError as e:
         messages.error(request, user_message(e))
     else:

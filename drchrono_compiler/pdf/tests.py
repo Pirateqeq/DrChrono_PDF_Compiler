@@ -269,24 +269,37 @@ class TestGenerateView:
         assert 'NOTE-2' in pages[3]
         assert '98940' in pages[4]
 
-    def test_failed_note_download_is_skipped_and_listed(self, auth_client, drchrono):
-        # Was a known bug: an empty note buffer broke the merge and the whole PDF failed.
+    def test_failed_note_download_stops_generation_with_notice(self, auth_client, drchrono):
         drchrono.routes['https://files.example.test/note-1.pdf'] = fake_response(status=404)
 
-        pages = pdf_text(self.generate(auth_client).getvalue())
+        response = self.generate(auth_client)
 
-        assert 'Not included' in pages[0] and "Mar 10, 2025 clinical note: couldn't download it" in pages[0]
-        assert 'Patient Account Balance' in pages[1]
-        assert len(pages) == 5  # not included, balance, visit 1 claim, visit 2 note and claim
+        assert response.url == LIST_URL
+        assert message_texts(response) == ["The PDF wasn't generated because these parts couldn't be built:",
+                                           "Mar 10, 2025 clinical note: couldn't download it"]
 
-    def test_visit_without_charges_lists_its_claim(self, auth_client, drchrono):
+    def test_visit_without_charges_stops_generation_with_notice(self, auth_client, drchrono):
         data = two_visits()
         drchrono.routes['/api/line_items?patient=101'] = fake_response(
             {'results': [i for i in data['line_items'] if i['appointment'] == 1], 'next': None})
 
-        pages = pdf_text(self.generate(auth_client).getvalue())
+        response = self.generate(auth_client)
 
-        assert 'May 20, 2025 claim form: no charges' in pages[0]
+        assert response.url == LIST_URL
+        assert 'May 20, 2025 claim form: no charges' in message_texts(response)
+
+    def test_every_problem_is_listed_at_once(self, auth_client, drchrono):
+        drchrono.routes['https://files.example.test/note-1.pdf'] = fake_response(content=b'<html>')
+        drchrono.routes['/api/line_items?patient=101'] = fake_response({'results': [], 'next': None})
+
+        response = self.generate(auth_client)
+
+        assert message_texts(response) == [
+            "The PDF wasn't generated because these parts couldn't be built:",
+            "Mar 10, 2025 clinical note: the downloaded file isn't a PDF",
+            'Mar 10, 2025 claim form: no charges',
+            'May 20, 2025 claim form: no charges',
+        ]
 
     def test_more_than_six_charges_add_a_claim_form(self, auth_client, drchrono):
         many = [make_line_item(2, str(99200 + n), '10.00', service_date='2025-05-20') for n in range(7)]

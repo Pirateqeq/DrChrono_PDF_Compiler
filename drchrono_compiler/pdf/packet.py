@@ -1,11 +1,9 @@
-"""The billing PDF: fetch everything once, then assemble it visit by visit, skipping (and listing) what fails."""
+"""The billing PDF: fetch everything once, then assemble it visit by visit; all or nothing."""
 from collections import defaultdict
 from io import BytesIO
 
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from core import drchrono
 
@@ -13,7 +11,7 @@ from . import balance, hcfa
 
 
 class PacketError(Exception):
-    """The PDF can't be built at all; the message says why, in plain words."""
+    """No PDF is generated. Each argument is one line of the notice shown to the user."""
 
 
 class NoteError(Exception):
@@ -49,21 +47,25 @@ def by_visit(line_items):
 
 
 def build(packet):
-    """PDF bytes: balance report, then each selected visit's note and claim forms, oldest visit first."""
-    skipped = []
+    """PDF bytes: balance report, then each selected visit's note and claim forms, oldest visit first.
+
+    All or nothing: if any note or claim can't be built, PacketError lists every problem at once,
+    so they can all be fixed before trying again.
+    """
+    problems = []
     parts = [balance.balance_report(packet['patient'], packet['appointments'], packet['line_items'])]
     for visit in packet['selected']:
         when = f"{visit['scheduled_time']:%b %d, %Y}"
         try:
             parts.append(download_note(visit))
         except NoteError as e:
-            skipped.append(f'{when} clinical note: {e}')
+            problems.append(f'{when} clinical note: {e}')
         try:
             parts.extend(hcfa.claim_forms(packet['patient'], visit, packet['line_items'][visit['id']]))
         except hcfa.ClaimError as e:
-            skipped.append(f'{when} claim form: {e}')
-    if skipped:
-        parts.insert(0, _not_included_page(skipped))
+            problems.append(f'{when} claim form: {e}')
+    if problems:
+        raise PacketError("The PDF wasn't generated because these parts couldn't be built:", *problems)
     writer = PdfWriter()
     for part in parts:
         writer.append(BytesIO(part))
@@ -85,13 +87,3 @@ def download_note(visit):
     except PdfReadError as e:
         raise NoteError("the downloaded file isn't a PDF") from e
     return content
-
-
-def _not_included_page(skipped):
-    styles = getSampleStyleSheet()
-    lines = [Paragraph('Not included', styles['Heading1']),
-             Paragraph('These parts could not be built and are missing from this report:', styles['Normal']),
-             Spacer(1, 8)] + [Paragraph(f'&bull; {line}', styles['Normal']) for line in skipped]
-    buffer = BytesIO()
-    SimpleDocTemplate(buffer, pagesize=hcfa.PAGE_SIZE).build(lines)
-    return buffer.getvalue()
