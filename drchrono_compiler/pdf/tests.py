@@ -15,6 +15,15 @@ from core.testing import (
     make_pdf_bytes,
     message_texts,
 )
+from pdf.golden import (
+    BALANCE_REPORT_GOLDEN,
+    CLAIM_FORM_GOLDEN,
+    GOLDEN_BALANCE_ITEMS,
+    GOLDEN_BALANCE_VISITS,
+    GOLDEN_CHARGES,
+    GOLDEN_VISIT,
+    record_drawing,
+)
 from pdf.services import (
     fetch_hcfa_data,
     generate_balance_report,
@@ -86,6 +95,24 @@ def hcfa_data(**patient_overrides):
 
 
 # ── fetch_hcfa_data ───────────────────────────────────────────────────────────
+
+# ── Golden output: the overhaul must reproduce today's documents ──────────────
+
+class TestGoldenOutput:
+    def test_claim_form_drawing_unchanged(self):
+        drawn = record_drawing(lambda: generate_hcfa_bill(None, fetch_hcfa_data(make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES)))
+        assert drawn == CLAIM_FORM_GOLDEN
+
+    def test_balance_report_text_unchanged(self, drchrono):
+        items = {}
+        for item in GOLDEN_BALANCE_ITEMS:
+            items.setdefault(item['appointment'], []).append(item)
+        drchrono.routes['/api/appointments'] = fake_response({'results': GOLDEN_BALANCE_VISITS, 'next': None})
+        for appt_id, appt_items in items.items():
+            drchrono.routes[f'/api/line_items?appointment={appt_id}'] = fake_response({'results': appt_items, 'next': None})
+
+        assert pdf_text(generate_balance_report(101, 'tok'))[0] == BALANCE_REPORT_GOLDEN
+
 
 class TestFetchHcfaData:
     def test_maps_patient_and_visit_fields(self):
