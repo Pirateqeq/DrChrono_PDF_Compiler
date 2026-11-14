@@ -5,7 +5,7 @@ import pytest
 from django.urls import reverse
 from pypdf import PdfReader
 
-from core.drchrono import DRCHRONO
+from core.drchrono import DRCHRONO, by_visit
 from core.testing import (
     FakeDrChrono,
     fake_response,
@@ -77,7 +77,7 @@ class TestGoldenOutput:
         assert drawn == CLAIM_FORM_GOLDEN
 
     def test_balance_report_text_unchanged(self):
-        report = balance.balance_report(make_patient(), GOLDEN_BALANCE_VISITS, packet.by_visit(GOLDEN_BALANCE_ITEMS))
+        report = balance.balance_report(make_patient(), GOLDEN_BALANCE_VISITS, by_visit(GOLDEN_BALANCE_ITEMS))
         assert pdf_text(report)[0] == BALANCE_REPORT_GOLDEN
 
 
@@ -122,7 +122,6 @@ class TestClaimForms:
         assert (x, hcfa.PAGE_HEIGHT - 148, '✓') in drawn
 
     @pytest.mark.parametrize('visit, items, reason', [
-        (GOLDEN_VISIT, [], 'no charges'),
         ({**GOLDEN_VISIT, 'icd10_codes': []}, GOLDEN_CHARGES, 'no ICD-10 diagnosis codes'),
         ({**GOLDEN_VISIT, 'clinical_note': {'pdf': 'https://x/n.pdf'}}, GOLDEN_CHARGES, 'no signature date'),
     ])
@@ -157,7 +156,7 @@ class TestMissingDetails:
 
 class TestBalanceReport:
     def report_text(self, visits=GOLDEN_BALANCE_VISITS, items=GOLDEN_BALANCE_ITEMS):
-        return pdf_text(balance.balance_report(make_patient(), visits, packet.by_visit(items)))[0]
+        return pdf_text(balance.balance_report(make_patient(), visits, by_visit(items)))[0]
 
     def test_totals_unpaid_charges_and_skips_paid_ones(self):
         text = self.report_text()
@@ -286,27 +285,31 @@ class TestGenerateView:
         assert message_texts(response) == ["The PDF wasn't generated because these parts couldn't be built:",
                                            "Mar 10, 2025 clinical note: couldn't download it"]
 
-    def test_visit_without_charges_stops_generation_with_notice(self, auth_client, drchrono):
+    def test_visit_without_charges_gets_its_note_but_no_claim_form(self, auth_client, drchrono):
         data = two_visits()
         drchrono.routes['/api/line_items?patient=101'] = fake_response(
             {'results': [i for i in data['line_items'] if i['appointment'] == 1], 'next': None})
 
-        response = self.generate(auth_client)
+        pages = pdf_text(self.generate(auth_client).getvalue())
 
-        assert response.url == LIST_URL
-        assert 'May 20, 2025 claim form: no charges' in message_texts(response)
+        assert len(pages) == 4  # balance, note 1, claim 1, note 2
+        assert 'NOTE-2' in pages[3]
+        assert not any('98940' in page for page in pages)
 
     def test_every_problem_is_listed_at_once(self, auth_client, drchrono):
+        visits = two_visits()['appointments']
+        visits[0]['icd10_codes'] = []
+        visits[1]['clinical_note'] = {'pdf': 'https://files.example.test/note-1.pdf'}  # no signature date
+        drchrono.routes['/api/appointments'] = fake_response({'results': visits, 'next': None})
         drchrono.routes['https://files.example.test/note-1.pdf'] = fake_response(content=b'<html>')
-        drchrono.routes['/api/line_items?patient=101'] = fake_response({'results': [], 'next': None})
 
         response = self.generate(auth_client)
 
         assert message_texts(response) == [
             "The PDF wasn't generated because these parts couldn't be built:",
             "Mar 10, 2025 clinical note: the downloaded file isn't a PDF",
-            'Mar 10, 2025 claim form: no charges',
-            'May 20, 2025 claim form: no charges',
+            'Mar 10, 2025 claim form: the clinical note has no signature date',
+            'May 20, 2025 claim form: no ICD-10 diagnosis codes',
         ]
 
     def test_more_than_six_charges_add_a_claim_form(self, auth_client, drchrono):

@@ -80,9 +80,7 @@ def missing_details(patient):
 
 
 def claim_forms(patient, visit, charges):
-    """One filled form (PDF bytes) per six charges of the visit."""
-    if not charges:
-        raise ClaimError('no charges')
+    """One filled form (PDF bytes) per six charges of the visit (packet.build skips visits with none)."""
     if not visit.get('icd10_codes'):
         raise ClaimError('no ICD-10 diagnosis codes')
     note = visit.get('clinical_note')

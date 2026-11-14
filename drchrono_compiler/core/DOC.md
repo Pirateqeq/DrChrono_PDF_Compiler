@@ -23,6 +23,7 @@ Callers pass the access token that [`require_auth`](../verify/DOC.md) puts on `r
 | `patient(token, patient_id)` | `GET /api/patients/{id}` | Demographics for the balance report and HCFA form. |
 | `appointment(token, appt_id)` | `GET /api/appointments/{id}?verbose=true` | `verbose` adds `clinical_note`. |
 | `line_items(token, **filters)` | `GET /api/line_items` | Pass `appointment=` or `patient=`; every page is read. |
+| `by_visit(line_items)` | — | Line items grouped by visit ID **as text** (a missing visit gives `[]`). DrChrono sends a visit's `id` as text but a line item's `appointment` as a number, so comparing them as-is matches nothing (every visit once looked like it had no charges). Used by the appointment list and `pdf`. |
 | `note_pdf_url(appt)` | — | The clinical note's PDF URL (`{'pdf': url}` or the URL itself), or `None`. Used by eligibility and by `pdf`'s downloads. |
 | `eligible_appointments(token, patient_id)` | `GET /api/appointments` | See below. |
 

@@ -1,4 +1,5 @@
 """DrChrono API client: every DrChrono data call except sign-in goes through here."""
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -71,6 +72,18 @@ def appointment(token, appt_id):
 def line_items(token, **filters):
     """Billing line items, filtered by `appointment=` or `patient=`."""
     return get_all(token, '/api/line_items', **filters)
+
+
+def by_visit(line_items):
+    """Line items grouped by visit ID as text (missing visits give an empty list).
+
+    DrChrono sends a visit's own `id` as text but a line item's `appointment` as a number, so both
+    sides are compared as text: look visits up with `str(visit['id'])`.
+    """
+    grouped = defaultdict(list)
+    for item in line_items:
+        grouped[str(item['appointment'])].append(item)
+    return grouped
 
 
 def download(url):

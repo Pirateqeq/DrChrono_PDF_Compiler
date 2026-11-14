@@ -114,6 +114,13 @@ class TestHelpers:
         assert drchrono.line_items('tok', **filters) == [make_line_item(5)]
         assert api.calls[0]['params'] == filters
 
+    def test_by_visit_groups_by_visit_id_as_text(self):
+        # DrChrono: a visit's id is text ("5"), a line item's appointment is a number (5).
+        grouped = drchrono.by_visit([make_line_item(5, '99213'), make_line_item(6), make_line_item(5, '97140')])
+
+        assert [i['code'] for i in grouped['5']] == ['99213', '97140']
+        assert grouped['7'] == []
+
 
 # ── eligible_appointments ─────────────────────────────────────────────────────
 

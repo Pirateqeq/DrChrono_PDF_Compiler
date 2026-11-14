@@ -1,5 +1,4 @@
 """The billing PDF: fetch everything once, then assemble it visit by visit; all or nothing."""
-from collections import defaultdict
 from io import BytesIO
 
 from pypdf import PdfReader, PdfWriter
@@ -30,7 +29,7 @@ def load(token, patient_id, selected_ids):
     missing = hcfa.missing_details(patient)
     if missing:
         raise PacketError(f"Can't build claim forms: missing {', '.join(missing)}.")
-    line_items = by_visit(drchrono.line_items(token, patient=patient_id))
+    line_items = drchrono.by_visit(drchrono.line_items(token, patient=patient_id))
     # The visit list normally carries ICD-10 codes; fetch a visit only if they're absent.
     selected = sorted((by_id[i] if 'icd10_codes' in by_id[i]
                        else by_id[i] | {'icd10_codes': drchrono.appointment(token, i).get('icd10_codes')}
@@ -38,23 +37,12 @@ def load(token, patient_id, selected_ids):
     return {'patient': patient, 'appointments': appointments, 'selected': selected, 'line_items': line_items}
 
 
-def by_visit(line_items):
-    """Line items grouped by visit ID as text (missing visits give an empty list).
-
-    DrChrono sends a visit's own `id` as text but a line item's `appointment` as a number, so both
-    sides are compared as text: look visits up with `str(visit['id'])`.
-    """
-    grouped = defaultdict(list)
-    for item in line_items:
-        grouped[str(item['appointment'])].append(item)
-    return grouped
-
-
 def build(packet):
     """PDF bytes: balance report, then each selected visit's note and claim forms, oldest visit first.
 
-    All or nothing: if any note or claim can't be built, PacketError lists every problem at once,
-    so they can all be fixed before trying again.
+    A visit with no charges has nothing to bill: its note is included, with no claim form (the
+    appointment list tags such visits). All or nothing otherwise: if any note or claim can't be
+    built, PacketError lists every problem at once, so they can all be fixed before trying again.
     """
     problems = []
     parts = [balance.balance_report(packet['patient'], packet['appointments'], packet['line_items'])]
@@ -64,8 +52,11 @@ def build(packet):
             parts.append(download_note(visit))
         except NoteError as e:
             problems.append(f'{when} clinical note: {e}')
+        charges = packet['line_items'][str(visit['id'])]
+        if not charges:
+            continue
         try:
-            parts.extend(hcfa.claim_forms(packet['patient'], visit, packet['line_items'][str(visit['id'])]))
+            parts.extend(hcfa.claim_forms(packet['patient'], visit, charges))
         except hcfa.ClaimError as e:
             problems.append(f'{when} claim form: {e}')
     if problems:

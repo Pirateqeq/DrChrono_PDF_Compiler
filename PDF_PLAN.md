@@ -12,6 +12,7 @@ Rewrite of the `pdf` app, which builds the billing PDF: the balance report, then
 
   Rejected: the full `REDESIGN.md` §3 structure (B, about 9 modules of mostly handover code) and fixing in place (C, keeps the 250-line drawing function).
 - ~~When one visit's part fails, skip it and list it.~~ **Changed after the real-data check:** if any part can't be built, no PDF is generated; the user gets a notice listing every problem and why (all problems at once, so they can be fixed together).
+- **Visits with no charges** (decided after the real-data check): they don't block the PDF. The note is included and the claim form skipped, and the appointment list tags these visits "No charges" beforehand (one more DrChrono call when the list opens).
 - **More than 6 charges on a visit:** print **extra claim forms** for that visit, 6 charges per form, each with its own total.
 - **Reuse connections:** `core.drchrono` and the note downloads go through one `requests.Session` per worker process, so each request after the first skips the new-connection setup (about 0.1–0.4 s per request measured). Gunicorn's default sync workers handle one request at a time, so one shared session per process is safe.
 

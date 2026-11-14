@@ -10,7 +10,7 @@ How the [DrChrono PDF Compiler](README.md) fits together: what the user does, wh
 | 2 | `/oauth/callback` (`verify`) | Signs in to DrChrono, allows access | Checks `state`, exchanges code for tokens, saves them to a passwordless local user | "Successfully connected as …", search page |
 | 3 | `/search/` (`search`) | Enters first name, last name and/or DOB, clicks **Search Patients** | Calls `/api/patients_summary`, stores results in session | "Found N matching patient(s)." |
 | 4 | `/search/results/` (`search`) | Clicks **Select & View Appointments** | Loads every past, attended visit scheduled in the last 3 years with a clinical note PDF | Patient cards (name, DOB, chart ID) |
-| 5 | `/appts/patient/<id>/` (`appts`) | Unticks unwanted visits, clicks **Generate PDF Report for Selected** | — | Visits newest first, all ticked |
+| 5 | `/appts/patient/<id>/` (`appts`) | Unticks unwanted visits, clicks **Generate PDF Report for Selected** | Fetches the patient's line items to spot visits with no charges | Visits newest first, all ticked; visits with no charges tagged **No charges** |
 | 6 | `POST /pdf/patient/<id>/generate-selected/` (`pdf`) | Waits | Fetches data, draws forms, merges | Download `Patient_<First>_<Last>_REPORT.pdf`, or back to step 5 with errors |
 | 7 | `POST /logout/` (`verify`) | Clicks **Log out** in the navbar | Revokes the app's DrChrono access, deletes stored tokens, ends the session (DrChrono itself stays signed in) | Sign-in page: "You're signed out." |
 
@@ -75,7 +75,7 @@ sequenceDiagram
     PDF->>PDF: Balance report (all eligible visits)
     loop Each ticked visit, oldest first
         PDF->>DC: Download clinical note PDF
-        PDF->>PDF: Claim form(s), 6 charges per form
+        PDF->>PDF: Claim form(s), 6 charges per form (none if the visit has no charges)
         PDF->>PDF: Note any part that can't be built
     end
     alt Any part couldn't be built
@@ -93,7 +93,7 @@ Patient_<First>_<Last>_REPORT.pdf
 ├── Balance report        provider, patient, total balance, unpaid line items
 ├── Visit A (oldest)
 │   ├── Clinical note     DrChrono's PDF, as is
-│   └── HCFA-1500         one page per 6 charges
+│   └── HCFA-1500         one page per 6 charges (none for a visit with no charges)
 ├── Visit B
 │   ├── Clinical note
 │   └── HCFA-1500
@@ -138,4 +138,5 @@ HCFA-1500 box sources:
 | More than 50 search matches | "DrChrono found more than 50 matches. Add details to narrow the search." |
 | Visits can't load | "Failed to load appointments: …", empty list |
 | Patient or practice details every claim needs are missing | Back on the visit list: "Can't build claim forms: missing patient zip code." |
+| A visit with no charges | Tagged **No charges** on the visit list; if ticked, the PDF has its note but no claim form |
 | Any visit's note or claim can't be built | No PDF. Back on the visit list: "The PDF wasn't generated because these parts couldn't be built:" plus one line per problem, e.g. "Mar 10, 2025 clinical note: couldn't download it" |

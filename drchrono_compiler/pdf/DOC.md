@@ -15,7 +15,7 @@ views.generate ──> packet.load ──> core.drchrono (about 3 calls)
 2. **`packet.load(token, patient_id, selected_ids)`** fetches everything once:
    - `drchrono.patient`
    - `eligible_appointments` (every page)
-   - `line_items(patient=…)` (every page), grouped by visit
+   - `line_items(patient=…)` (every page), grouped by visit with [`drchrono.by_visit`](../core/DOC.md)
 
    Then it:
    - **Checks the ticked IDs** are this patient's eligible visits. A stale or altered form can't put another visit on the claims: "The visit list changed. Reload the page and try again."
@@ -25,7 +25,8 @@ views.generate ──> packet.load ──> core.drchrono (about 3 calls)
 3. **`packet.build(packet)`** assembles the PDF:
    - **Balance report** (`balance.py`), covering all eligible visits, not just the ticked ones.
    - **For each ticked visit:** its clinical note (`download_note`), then its claim form(s) (`hcfa.claim_forms`).
-   - **All or nothing.** Every note (`NoteError`) and claim (`ClaimError`) problem across all ticked visits is collected. If there are any, **no PDF is generated**: the user returns to the visit list with a notice, "The PDF wasn't generated because these parts couldn't be built:", followed by one line per problem (for example "Mar 10, 2025 clinical note: couldn't download it", "May 20, 2025 claim form: no charges"). Listing all of them at once means they can be fixed together before trying again.
+   - **Visits with no charges** have nothing to bill: the note is included and the claim form is skipped, without stopping the PDF. The [appointment list](../appts/DOC.md) tags these visits "No charges" so staff see it before ticking.
+   - **All or nothing.** Every note (`NoteError`) and claim (`ClaimError`) problem across all ticked visits is collected. If there are any, **no PDF is generated**: the user returns to the visit list with a notice, "The PDF wasn't generated because these parts couldn't be built:", followed by one line per problem (for example "Mar 10, 2025 clinical note: couldn't download it", "May 20, 2025 claim form: no ICD-10 diagnosis codes"). Listing all of them at once means they can be fixed together before trying again.
 4. The view returns the PDF as `Patient_<First>_<Last>_REPORT.pdf` via Django's `FileResponse`, which quotes and encodes the name so quotes or accents can't break the download header.
 
 **Cost:** about 3 DrChrono calls (plus one per extra page of visits or line items), plus one note download per ticked visit. All go through `core.drchrono.session`, so connections are reused.
@@ -38,15 +39,15 @@ views.generate ──> packet.load ──> core.drchrono (about 3 calls)
 | `PacketError`: ticked visit not on the patient's list, or details every claim needs are missing | Back to the list with that message |
 | `DrChronoError` (DrChrono down, rate limit, 404…) | Back to the list with [`core.drchrono.user_message`](../core/DOC.md) |
 | DrChrono rejects the token (401) | `DrChronoAuthError` reaches `require_auth`: sign-in page |
+| A ticked visit has no charges | PDF generated; that visit has its note but no claim form (tagged on the list beforehand) |
 | Any visit's note or claim can't be built | No PDF; back to the list with the notice listing every problem and why |
 
 No `except Exception` anywhere: each handler catches a specific error type.
 
 ## packet.py
 
-- **`load`**, **`build`**: as above. `load` returns a dict: `patient`, `appointments` (all eligible), `selected` (ticked, oldest first), `line_items` (visit ID → list).
+- **`load`**, **`build`**: as above. `load` returns a dict: `patient`, `appointments` (all eligible), `selected` (ticked, oldest first), `line_items` (visit ID as text → list).
 - **`download_note(visit)`**: downloads the note's PDF (URL from [`drchrono.note_pdf_url`](../core/DOC.md)) with [`drchrono.download`](../core/DOC.md). Raises `NoteError` when there's no URL, the download fails (a 401 from the file host counts as a broken link, not an expired sign-in), or the file isn't a readable PDF (checked here so a bad file never reaches the merge).
-- **`by_visit(line_items)`**: groups line items by visit ID **as text**; used by `load`, `build`, the balance report and the tests. DrChrono sends a visit's `id` as text but a line item's `appointment` as a number, so comparing them as-is matches nothing (every visit looked like it had "no charges").
 
 ## balance.py
 
@@ -54,7 +55,7 @@ No `except Exception` anywhere: each handler catches a specific error type.
 
 ## hcfa.py
 
-- **`claim_forms(patient, visit, charges) -> list[bytes]`**: one filled form per **6 charges** (box 24 has six service lines). More charges continue on extra forms for the same visit, each with its own box 28 total. Raises `ClaimError` for a visit with no charges, no ICD-10 codes, or a clinical note with no `updated_at` (the signature date).
+- **`claim_forms(patient, visit, charges) -> list[bytes]`**: one filled form per **6 charges** (box 24 has six service lines). More charges continue on extra forms for the same visit, each with its own box 28 total. Only called for visits with charges. Raises `ClaimError` for a visit with no ICD-10 codes or a clinical note with no `updated_at` (the signature date).
 - **`missing_details(patient)`**: the patient fields and practice settings every claim needs that are empty.
 - **Layout as data**: `CHECKS` (always-ticked boxes), `SEX_CHECKS`, `TEXT` (field → every position it's printed at), `LINE_X` (box 24 columns, lines 24 points apart) and the box 21 ICD-10 positions. All positions are `(x, y)` with y measured down from the top of a 620×800 page, hand-tuned to `forms/HCFA.pdf` and copied unchanged from the original code. Checkmarks are drawn before the font switches to Courier 10, as before.
 - **Phone numbers**: 10 digits print as area code + `555-0123`. Anything else prints as given in the number box, with no area code.
@@ -85,4 +86,4 @@ The blank HCFA-1500 template, opened by an absolute path built from `Path(__file
 ## Tests (`tests.py`, `golden.py`)
 
 - **Golden output**: `golden.py` holds what the pre-overhaul code drew for a 5-charge visit (every `drawString` x, y and text) and the balance report's text. The tests require the new code to produce exactly the same. To change the layout on purpose, regenerate them as `golden.py` explains.
-- **DrChrono and note files**: faked with `FakeDrChrono` patched on `core.drchrono.session.get`. Tests cover the 3-call fetch, the visit check, missing details, the ICD-10 fallback, page order, all-or-nothing notices, extra forms past 6 charges, plain messages, and 401 → sign-in.
+- **DrChrono and note files**: faked with `FakeDrChrono` patched on `core.drchrono.session.get`. Tests cover the 3-call fetch, the visit check, missing details, the ICD-10 fallback, page order, all-or-nothing notices, visits with no charges (note, no claim form), extra forms past 6 charges, plain messages, and 401 → sign-in.
