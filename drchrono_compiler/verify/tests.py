@@ -18,7 +18,6 @@ from verify.services import (
     authorize_url,
     fetch_current_user,
     get_access_token,
-    get_valid_access_token,
     request_token,
     require_auth,
     save_token,
@@ -157,14 +156,6 @@ class TestGetAccessToken:
     def test_user_without_credential_raises(self, user):
         with pytest.raises(DrChronoAuthError):
             get_access_token(user)
-
-    def test_request_wrapper(self, credential, make_request):
-        assert get_valid_access_token(make_request(credential.user)) == 'valid-access-token'
-
-    def test_request_wrapper_reuses_token_from_require_auth(self, credential, make_request):
-        request = make_request(credential.user)
-        request.drchrono_token = 'already-fetched'
-        assert get_valid_access_token(request) == 'already-fetched'
 
 
 # ── require_auth ──────────────────────────────────────────────────────────────
