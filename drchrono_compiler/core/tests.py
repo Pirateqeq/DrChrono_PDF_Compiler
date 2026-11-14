@@ -1,94 +1,146 @@
-from datetime import datetime, timedelta
-from unittest.mock import Mock
+from datetime import date, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 import requests
 
-from core.services import fetch_appointment, fetch_lineitem, fetch_patient, get_valid_appointments
-from core.testing import fake_response, make_appointment, make_line_item, make_patient
-
-HEADERS = {'Authorization': 'Bearer t'}
-
-
-def fake_requests(json_data=None, status=200):
-    module = Mock()
-    module.get.return_value = fake_response(json_data, status=status)
-    return module
+from core import drchrono
+from core.drchrono import DrChronoError
+from core.testing import FakeDrChrono, fake_response, make_appointment, make_line_item, make_patient
 
 
 def days_ago(n):
     return (datetime.now() - timedelta(days=n)).replace(microsecond=0).isoformat()
 
 
-# ── Fetch helpers ─────────────────────────────────────────────────────────────
-
-class TestFetchHelpers:
-    def test_fetch_appointment(self):
-        api = fake_requests(make_appointment(5))
-
-        assert fetch_appointment(api, HEADERS, 5) == make_appointment(5)
-        api.get.assert_called_once_with(
-            'https://app.drchrono.com/api/appointments/5?verbose=true', headers=HEADERS, timeout=10)
-
-    def test_fetch_lineitem_returns_results_list(self):
-        items = [make_line_item(5)]
-        api = fake_requests({'results': items, 'next': None})
-
-        assert fetch_lineitem(api, HEADERS, 5) == items
-        api.get.assert_called_once_with(
-            'https://app.drchrono.com/api/line_items?appointment=5', headers=HEADERS, timeout=10)
-
-    def test_fetch_patient(self):
-        api = fake_requests(make_patient())
-
-        assert fetch_patient(api, HEADERS, 101) == make_patient()
-        api.get.assert_called_once_with(
-            'https://app.drchrono.com/api/patients/101', headers=HEADERS, timeout=10)
-
-    @pytest.mark.parametrize('call', [
-        lambda api: fetch_appointment(api, HEADERS, 5),
-        lambda api: fetch_lineitem(api, HEADERS, 5),
-        lambda api: fetch_patient(api, HEADERS, 101),
-    ])
-    def test_http_errors_raise(self, call):
-        with pytest.raises(requests.HTTPError):
-            call(fake_requests({}, status=500))
+@pytest.fixture
+def api():
+    """FakeDrChrono standing in for requests.get; add routes per test."""
+    fake = FakeDrChrono({})
+    with patch('core.drchrono.requests.get', fake.get):
+        yield fake
 
 
-# ── get_valid_appointments ────────────────────────────────────────────────────
-
-def valid_ids(appointments):
-    api = fake_requests({'results': appointments})
-    return [a['id'] for a in get_valid_appointments(api, HEADERS, 101)]
+def page(results, next_url=None):
+    return fake_response({'previous': None, 'results': results, 'next': next_url})
 
 
-class TestGetValidAppointments:
-    def test_request_parameters(self):
-        api = fake_requests({'results': []})
+# ── get / get_all ─────────────────────────────────────────────────────────────
 
-        get_valid_appointments(api, HEADERS, 101)
+class TestGet:
+    def test_builds_url_header_params_and_timeout(self, api):
+        api.routes['/api/patients/101'] = fake_response(make_patient())
 
-        assert api.get.call_args.args[0] == 'https://app.drchrono.com/api/appointments'
-        params = api.get.call_args.kwargs['params']
-        assert params['patient'] == 101
-        assert params['verbose'] == 'true'
-        assert params['page_size'] == 50
-        three_years_ago = (datetime.now() - timedelta(days=365 * 3)).strftime('%Y-%m-%d')
-        assert params['since'] == f'{three_years_ago}T00:00:00'
+        assert drchrono.get('tok', '/api/patients/101', verbose='true') == make_patient()
+        call = api.calls[0]
+        assert call['url'] == 'https://app.drchrono.com/api/patients/101'
+        assert call['headers'] == {'Authorization': 'Bearer tok'}
+        assert call['params'] == {'verbose': 'true'}
+        assert call['timeout'] == 10
+
+    def test_full_url_used_as_is(self, api):
+        api.routes['/api/line_items?cursor=abc'] = page([])
+
+        drchrono.get('tok', 'https://app.drchrono.com/api/line_items?cursor=abc')
+
+        assert api.calls[0]['url'] == 'https://app.drchrono.com/api/line_items?cursor=abc'
+        assert api.calls[0]['params'] == {}
+
+    @pytest.mark.parametrize('status', [401, 404, 429, 500])
+    def test_http_error_carries_status(self, status, api):
+        api.routes['/api/patients/101'] = fake_response({}, status=status)
+
+        with pytest.raises(DrChronoError) as exc:
+            drchrono.get('tok', '/api/patients/101')
+        assert exc.value.status == status
+
+    def test_network_error_has_no_status(self):
+        with patch('core.drchrono.requests.get', side_effect=requests.ConnectionError('down')):
+            with pytest.raises(DrChronoError) as exc:
+                drchrono.get('tok', '/api/patients/101')
+        assert exc.value.status is None
+
+
+class TestGetAll:
+    def test_follows_next_links(self, api):
+        api.routes['/api/line_items'] = page([1, 2], 'https://app.drchrono.com/api/line_items?cursor=p2')
+        api.routes['/api/line_items?cursor=p2'] = page([3], 'https://app.drchrono.com/api/line_items?cursor=p3')
+        api.routes['/api/line_items?cursor=p3'] = page([4])
+
+        assert drchrono.get_all('tok', '/api/line_items', patient=101) == [1, 2, 3, 4]
+        assert [c['params'] for c in api.calls] == [{'patient': 101}, {}, {}]
+
+
+# ── Endpoint helpers ──────────────────────────────────────────────────────────
+
+class TestHelpers:
+    def test_patient(self, api):
+        api.routes['/api/patients/101'] = fake_response(make_patient())
+        assert drchrono.patient('tok', 101) == make_patient()
+
+    def test_appointment_is_verbose(self, api):
+        api.routes['/api/appointments/5'] = fake_response(make_appointment(5))
+
+        assert drchrono.appointment('tok', 5) == make_appointment(5)
+        assert api.calls[0]['params'] == {'verbose': 'true'}
+
+    @pytest.mark.parametrize('filters', [{'appointment': 5}, {'patient': 101}])
+    def test_line_items_filters_and_pages(self, filters, api):
+        api.routes['/api/line_items'] = page([make_line_item(5)], 'https://app.drchrono.com/api/line_items?cursor=2')
+        api.routes['/api/line_items?cursor=2'] = page([make_line_item(6)])
+
+        assert drchrono.line_items('tok', **filters) == [make_line_item(5), make_line_item(6)]
+        assert api.calls[0]['params'] == filters
+
+
+# ── eligible_appointments ─────────────────────────────────────────────────────
+
+def eligible_ids(api, visits):
+    api.routes['/api/appointments'] = page(visits)
+    return [a['id'] for a in drchrono.eligible_appointments('tok', 101)]
+
+
+class TestEligibleAppointments:
+    def test_request_parameters(self, api):
+        eligible_ids(api, [])
+
+        three_years_ago = (date.today() - timedelta(days=365 * 3)).isoformat()
+        assert api.calls[0]['params'] == {
+            'patient': 101, 'verbose': 'true', 'exclude_membership': 'true',
+            'occurred_since': f'{three_years_ago}T00:00:00', 'page_size': 25,
+        }
+
+    def test_includes_every_page(self, api):
+        api.routes['/api/appointments'] = page(
+            [make_appointment(1, days_ago(30))], 'https://app.drchrono.com/api/appointments?cursor=2')
+        api.routes['/api/appointments?cursor=2'] = page([make_appointment(2, days_ago(2))])
+
+        assert [a['id'] for a in drchrono.eligible_appointments('tok', 101)] == [2, 1]
 
     @pytest.mark.parametrize('status', ['Rescheduled', 'Cancelled', 'No Show'])
-    def test_drops_invalid_statuses(self, status):
-        assert valid_ids([make_appointment(1, days_ago(5), status=status)]) == []
+    def test_drops_skipped_statuses(self, status, api):
+        assert eligible_ids(api, [make_appointment(1, days_ago(5), status=status)]) == []
 
-    def test_keeps_attended_past_visits(self):
-        assert valid_ids([make_appointment(1, days_ago(5), status='Complete')]) == [1]
+    def test_keeps_attended_past_visits(self, api):
+        assert eligible_ids(api, [make_appointment(1, days_ago(5), status='Complete')]) == [1]
 
-    def test_drops_future_visits(self):
+    def test_drops_future_visits(self, api):
         future = (datetime.now() + timedelta(days=5)).replace(microsecond=0).isoformat()
-        assert valid_ids([make_appointment(1, future)]) == []
+        assert eligible_ids(api, [make_appointment(1, future)]) == []
 
-    def test_drops_visits_without_a_date(self):
-        assert valid_ids([make_appointment(1, None)]) == []
+    def test_drops_visits_without_a_date(self, api):
+        assert eligible_ids(api, [make_appointment(1, None)]) == []
+
+    def test_falls_back_to_date_field(self, api):
+        appt = make_appointment(1, days_ago(5))
+        appt['date'] = appt.pop('scheduled_time')[:10]
+
+        api.routes['/api/appointments'] = page([appt])
+
+        result = drchrono.eligible_appointments('tok', 101)
+
+        assert [a['id'] for a in result] == [1]
+        assert result[0]['scheduled_time'] == datetime.fromisoformat(appt['date'])
 
     @pytest.mark.parametrize('note, kept', [
         ({'pdf': 'https://files.example.test/n.pdf'}, True),
@@ -97,30 +149,15 @@ class TestGetValidAppointments:
         ('not-a-url', False),
         (None, False),
     ])
-    def test_requires_a_clinical_note_pdf(self, note, kept):
-        ids = valid_ids([make_appointment(1, days_ago(5), clinical_note=note)])
-        assert ids == ([1] if kept else [])
+    def test_requires_a_clinical_note_pdf(self, note, kept, api):
+        assert eligible_ids(api, [make_appointment(1, days_ago(5), clinical_note=note)]) == ([1] if kept else [])
 
-    def test_sorted_newest_first_with_datetimes(self):
-        api = fake_requests({'results': [
-            make_appointment(1, days_ago(30)),
-            make_appointment(2, days_ago(2)),
-            make_appointment(3, days_ago(10)),
-        ]})
+    def test_newest_first_with_parsed_times_and_api_data_unchanged(self, api):
+        visits = [make_appointment(1, days_ago(30)), make_appointment(2, days_ago(2)), make_appointment(3, days_ago(10))]
+        api.routes['/api/appointments'] = page(visits)
 
-        result = get_valid_appointments(api, HEADERS, 101)
+        result = drchrono.eligible_appointments('tok', 101)
 
         assert [a['id'] for a in result] == [2, 3, 1]
         assert all(isinstance(a['scheduled_time'], datetime) for a in result)
-
-    def test_falls_back_to_date_field(self):
-        # Known bug: the filter accepts `date` when `scheduled_time` is missing, but the
-        # code then reads appt['scheduled_time'] directly and raises KeyError.
-        appt = make_appointment(1, days_ago(5))
-        appt['date'] = appt.pop('scheduled_time')[:10]
-
-        assert valid_ids([appt]) == [1]
-
-    def test_http_error_raises(self):
-        with pytest.raises(requests.HTTPError):
-            get_valid_appointments(fake_requests({}, status=503), HEADERS, 101)
+        assert all(isinstance(v['scheduled_time'], str) for v in visits)
