@@ -1,8 +1,8 @@
-from django.db import models
 from django.contrib.auth.models import User
+from django.db import models
 from django.utils import timezone
 
-# User credential class
+
 class DrChronoCredential(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='drchrono_cred')
     access_token = models.CharField(max_length=255)
@@ -14,6 +14,4 @@ class DrChronoCredential(models.Model):
 
     @property
     def is_expired(self):
-        if not self.expires_at:
-            return True
-        return timezone.now() >= self.expires_at
+        return self.expires_at is None or timezone.now() >= self.expires_at
