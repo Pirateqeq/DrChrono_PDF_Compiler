@@ -73,6 +73,17 @@ def line_items(token, **filters):
     return get_all(token, '/api/line_items', **filters)
 
 
+def download(url):
+    """A file DrChrono links to, such as a clinical note PDF. These links need no auth header, and a 401
+    from the file host is a broken link, not an expired sign-in, so it stays a plain DrChronoError."""
+    try:
+        resp = session.get(url, timeout=15)
+        resp.raise_for_status()
+        return resp.content
+    except requests.RequestException as e:
+        raise DrChronoError(f'Download failed: {e}', getattr(e.response, 'status_code', None)) from e
+
+
 def note_pdf_url(appt):
     """The clinical note PDF's URL; DrChrono gives either {'pdf': url} or the URL itself."""
     note = appt.get('clinical_note')

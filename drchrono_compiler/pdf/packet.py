@@ -2,7 +2,6 @@
 from collections import defaultdict
 from io import BytesIO
 
-import requests
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
 from reportlab.lib.styles import getSampleStyleSheet
@@ -26,21 +25,27 @@ def load(token, patient_id, selected_ids):
     patient = drchrono.patient(token, patient_id)
     appointments = drchrono.eligible_appointments(token, patient_id)
     by_id = {str(appt['id']): appt for appt in appointments}
+    ids = set(selected_ids)
     # Only this patient's eligible visits: a stale or altered form can't put another visit on the claims.
-    if not set(selected_ids) <= by_id.keys():
+    if not ids <= by_id.keys():
         raise PacketError('The visit list changed. Reload the page and try again.')
     missing = hcfa.missing_details(patient)
     if missing:
         raise PacketError(f"Can't build claim forms: missing {', '.join(missing)}.")
-    line_items = defaultdict(list)
-    for item in drchrono.line_items(token, patient=patient_id):
-        line_items[item['appointment']].append(item)
-    selected = sorted((by_id[appt_id] for appt_id in set(selected_ids)), key=lambda appt: appt['scheduled_time'])
+    line_items = by_visit(drchrono.line_items(token, patient=patient_id))
     # The visit list normally carries ICD-10 codes; fetch a visit only if they're absent.
-    selected = [appt if 'icd10_codes' in appt
-                else appt | {'icd10_codes': drchrono.appointment(token, appt['id']).get('icd10_codes')}
-                for appt in selected]
+    selected = sorted((by_id[i] if 'icd10_codes' in by_id[i]
+                       else by_id[i] | {'icd10_codes': drchrono.appointment(token, i).get('icd10_codes')}
+                       for i in ids), key=lambda appt: appt['scheduled_time'])
     return {'patient': patient, 'appointments': appointments, 'selected': selected, 'line_items': line_items}
+
+
+def by_visit(line_items):
+    """Line items grouped by visit ID (missing visits give an empty list)."""
+    grouped = defaultdict(list)
+    for item in line_items:
+        grouped[item['appointment']].append(item)
+    return grouped
 
 
 def build(packet):
@@ -73,14 +78,13 @@ def download_note(visit):
     if not url:
         raise NoteError('no clinical note PDF')
     try:
-        resp = drchrono.session.get(url, timeout=15)
-        resp.raise_for_status()
-        PdfReader(BytesIO(resp.content))  # fail here, not halfway through the merge
-    except requests.RequestException as e:
+        content = drchrono.download(url)
+        PdfReader(BytesIO(content))  # fail here, not halfway through the merge
+    except drchrono.DrChronoError as e:
         raise NoteError("couldn't download it") from e
     except PdfReadError as e:
         raise NoteError("the downloaded file isn't a PDF") from e
-    return resp.content
+    return content
 
 
 def _not_included_page(skipped):
@@ -89,5 +93,5 @@ def _not_included_page(skipped):
              Paragraph('These parts could not be built and are missing from this report:', styles['Normal']),
              Spacer(1, 8)] + [Paragraph(f'&bull; {line}', styles['Normal']) for line in skipped]
     buffer = BytesIO()
-    SimpleDocTemplate(buffer, pagesize=(620, 800)).build(lines)
+    SimpleDocTemplate(buffer, pagesize=hcfa.PAGE_SIZE).build(lines)
     return buffer.getvalue()

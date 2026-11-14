@@ -26,7 +26,7 @@ views.generate ──> packet.load ──> core.drchrono (about 3 calls)
    - **Balance report** (`balance.py`), covering all eligible visits, not just the ticked ones.
    - **For each ticked visit:** its clinical note (`download_note`), then its claim form(s) (`hcfa.claim_forms`).
    - **Failures are skipped and listed.** A note that can't be included (`NoteError`) or a claim that can't be built (`ClaimError`) is left out, and a first page titled **"Not included"** lists each one, for example "Mar 10, 2025 clinical note: couldn't download it".
-4. The view returns the PDF as `Patient_<First>_<Last>_REPORT.pdf`.
+4. The view returns the PDF as `Patient_<First>_<Last>_REPORT.pdf` via Django's `FileResponse`, which quotes and encodes the name so quotes or accents can't break the download header.
 
 **Cost:** about 3 DrChrono calls (plus one per extra page of visits or line items), plus one note download per ticked visit. All go through `core.drchrono.session`, so connections are reused.
 
@@ -45,7 +45,8 @@ No `except Exception` anywhere: each handler catches a specific error type.
 ## packet.py
 
 - **`load`**, **`build`**: as above. `load` returns a dict: `patient`, `appointments` (all eligible), `selected` (ticked, oldest first), `line_items` (visit ID → list).
-- **`download_note(visit)`**: `GET` the note's PDF URL (from [`drchrono.note_pdf_url`](../core/DOC.md), no auth header, 15 s timeout). Raises `NoteError` when there's no URL, the download fails, or the file isn't a readable PDF (checked here so a bad file never reaches the merge).
+- **`download_note(visit)`**: downloads the note's PDF (URL from [`drchrono.note_pdf_url`](../core/DOC.md)) with [`drchrono.download`](../core/DOC.md). Raises `NoteError` when there's no URL, the download fails (a 401 from the file host counts as a broken link, not an expired sign-in), or the file isn't a readable PDF (checked here so a bad file never reaches the merge).
+- **`by_visit(line_items)`**: groups line items by visit ID; used by `load` and the tests.
 
 ## balance.py
 

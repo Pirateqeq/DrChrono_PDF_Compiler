@@ -8,6 +8,8 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from .hcfa import PAGE_SIZE
+
 TABLE_STYLE = TableStyle([
     ('BACKGROUND', (0, 0), (-1, 0), colors.white),
     ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
@@ -47,7 +49,7 @@ def balance_report(patient, appointments, line_items):
         Spacer(1, 36),
     ]
     buffer = BytesIO()
-    SimpleDocTemplate(buffer, pagesize=(620, 800), leftMargin=18, rightMargin=18, topMargin=36,
+    SimpleDocTemplate(buffer, pagesize=PAGE_SIZE, leftMargin=18, rightMargin=18, topMargin=36,
                       bottomMargin=36).build(elements)
     return buffer.getvalue()
 

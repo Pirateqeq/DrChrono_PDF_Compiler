@@ -1,5 +1,7 @@
+from io import BytesIO
+
 from django.contrib import messages
-from django.http import HttpResponse
+from django.http import FileResponse
 from django.shortcuts import redirect
 from django.views.decorators.http import require_POST
 
@@ -26,8 +28,7 @@ def generate(request, patient_id):
         messages.error(request, user_message(e))
     else:
         patient = contents['patient']
-        response = HttpResponse(pdf, content_type='application/pdf')
-        response['Content-Disposition'] = (
-            f'attachment; filename="Patient_{patient["first_name"]}_{patient["last_name"]}_REPORT.pdf"')
-        return response
+        # FileResponse quotes and encodes the name, so quotes or accents can't break the header.
+        return FileResponse(BytesIO(pdf), as_attachment=True, content_type='application/pdf',
+                            filename=f"Patient_{patient['first_name']}_{patient['last_name']}_REPORT.pdf")
     return redirect('appts_app:historical_list', patient_id=patient_id)

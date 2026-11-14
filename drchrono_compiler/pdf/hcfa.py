@@ -8,7 +8,7 @@ from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 
 TEMPLATE = Path(__file__).parent / 'forms' / 'HCFA.pdf'
-PAGE_WIDTH, PAGE_HEIGHT = 620, 800
+PAGE_SIZE = PAGE_WIDTH, PAGE_HEIGHT = 620, 800  # also used by the balance report and 'Not included' page
 LINES_PER_FORM = 6  # box 24 has six service lines; more charges go on extra forms
 
 # Positions are (x, y) with y measured down from the top of the page, hand-tuned to forms/HCFA.pdf.
@@ -50,9 +50,17 @@ TEXT = {
     'provider_info': [(388, 720)],
     'provider_npi': [(388, 760)],                          # box 33a
 }
-# Box 24 columns; line n is printed 24 points below line n-1, starting at y=555.
+# Box 24: line n is printed LINE_GAP points below line n-1, starting at LINE_TOP.
+LINE_TOP, LINE_GAP = 555, 24
 LINE_X = {'from_month': 32, 'from_day': 53, 'from_year': 74, 'to_month': 95, 'to_day': 116, 'to_year': 139,
           'place': 161, 'code': 210, 'pointer': 355, 'dollars': 387, 'cents': 427, 'units': 455, 'npi': 523}
+
+
+
+def icd_position(i):
+    """Box 21: four ICD-10 codes per row, rows 12 points apart."""
+    return 50 + 93 * i - 373 * (i // 4), 484 + 12 * (i // 4)
+
 
 PATIENT_DETAILS = {'first_name': 'first name', 'last_name': 'last name', 'date_of_birth': 'date of birth',
                    'gender': 'sex', 'address': 'address', 'city': 'city', 'state': 'state', 'zip_code': 'zip code',
@@ -123,18 +131,19 @@ def _draw(fields, sex, icd_codes, charges):
     total_dollars, total_cents = f"{sum(Decimal(c['price']) for c in charges):.2f}".split('.')
     fields = fields | {'total_dollars': total_dollars, 'total_cents': total_cents}
     buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT))
+    c = canvas.Canvas(buffer, pagesize=PAGE_SIZE)
     for x, y in CHECKS + SEX_CHECKS.get(sex, []):  # drawn before the font change, as on the original forms
         c.drawString(x, PAGE_HEIGHT - y, '✓')
     c.setFont('Courier', 10)
     for field, value in fields.items():
         for x, y in TEXT[field] if value else []:
             c.drawString(x, PAGE_HEIGHT - y, value)
-    for i, code in enumerate(icd_codes):  # box 21: four codes per row
-        c.drawString(50 + 93 * i - 373 * (i // 4), PAGE_HEIGHT - 484 - 12 * (i // 4), code)
+    for i, code in enumerate(icd_codes):
+        x, y = icd_position(i)
+        c.drawString(x, PAGE_HEIGHT - y, code)
     for row, charge in enumerate(charges):
         for column, value in _line(charge).items():
-            c.drawString(LINE_X[column], PAGE_HEIGHT - 555 - 24 * row, value)
+            c.drawString(LINE_X[column], PAGE_HEIGHT - LINE_TOP - LINE_GAP * row, value)
     c.save()
     writer = PdfWriter(clone_from=TEMPLATE)  # a fresh copy of the blank form per claim
     writer.pages[0].merge_page(PdfReader(buffer).pages[0])

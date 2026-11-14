@@ -5,6 +5,7 @@ import pytest
 from django.urls import reverse
 from pypdf import PdfReader
 
+from core.drchrono import DRCHRONO
 from core.testing import (
     FakeDrChrono,
     fake_response,
@@ -38,7 +39,7 @@ def two_visits():
     """Visit 1 (older: one unpaid charge, one paid) and visit 2 (newer: one charge)."""
     return {
         'patient': make_patient(),
-        'appointments': [make_appointment(2, '2025-05-20T10:00:00'), make_appointment(1, '2025-03-10T09:30:00')],
+        'appointments': [dict(visit) for visit in GOLDEN_BALANCE_VISITS],  # fresh copies: tests edit them
         'line_items': [make_line_item(1, '99213', '150.00'), make_line_item(1, '97140', '40.00', balance_total='0.00'),
                        make_line_item(2, '98940', '75.50', service_date='2025-05-20')],
     }
@@ -64,7 +65,7 @@ def drchrono():
 
 
 def api_calls(fake):
-    return [c['url'] for c in fake.calls if c['url'].startswith('https://app.drchrono.com/')]
+    return [c['url'] for c in fake.calls if c['url'].startswith(DRCHRONO)]
 
 
 # ── Golden output: the overhaul must reproduce today's documents ──────────────
@@ -75,7 +76,7 @@ class TestGoldenOutput:
         assert drawn == CLAIM_FORM_GOLDEN
 
     def test_balance_report_text_unchanged(self):
-        report = balance.balance_report(make_patient(), GOLDEN_BALANCE_VISITS, by_visit(GOLDEN_BALANCE_ITEMS))
+        report = balance.balance_report(make_patient(), GOLDEN_BALANCE_VISITS, packet.by_visit(GOLDEN_BALANCE_ITEMS))
         assert pdf_text(report)[0] == BALANCE_REPORT_GOLDEN
 
 
@@ -95,13 +96,14 @@ class TestClaimForms:
         assert 'FORM 1500' in pages[0] and 'Doe, Jane' in pages[0]  # template text plus the overlay
 
     def test_more_than_six_charges_continue_on_another_form(self):
-        drawn = record_drawing(lambda: hcfa.claim_forms(make_patient(), GOLDEN_VISIT, charges(7)))
+        forms = []
+        drawn = record_drawing(lambda: forms.extend(hcfa.claim_forms(make_patient(), GOLDEN_VISIT, charges(7))))
 
         codes = sorted(text for x, y, text in drawn if x == hcfa.LINE_X['code'])
         assert codes == [str(99200 + n) for n in range(7)]
-        totals = [text for x, y, text in drawn if (x, y) == (390, hcfa.PAGE_HEIGHT - 698)]
+        totals = [text for x, y, text in drawn if (x, y) == (390, hcfa.PAGE_HEIGHT - 698)]  # box 28
         assert sorted(totals) == ['16', '75']  # 10+11+...+15 on the first form, 16 on the second
-        assert len(hcfa.claim_forms(make_patient(), GOLDEN_VISIT, charges(7))) == 2
+        assert len(forms) == 2
 
     def test_six_charges_fit_one_form(self):
         assert len(hcfa.claim_forms(make_patient(), GOLDEN_VISIT, charges(6))) == 1
@@ -152,16 +154,9 @@ class TestMissingDetails:
 
 # ── generate_balance_report ───────────────────────────────────────────────────
 
-def by_visit(items):
-    grouped = {}
-    for item in items:
-        grouped.setdefault(item['appointment'], []).append(item)
-    return grouped
-
-
 class TestBalanceReport:
     def report_text(self, visits=GOLDEN_BALANCE_VISITS, items=GOLDEN_BALANCE_ITEMS):
-        return pdf_text(balance.balance_report(make_patient(), visits, by_visit(items)))[0]
+        return pdf_text(balance.balance_report(make_patient(), visits, packet.by_visit(items)))[0]
 
     def test_totals_unpaid_charges_and_skips_paid_ones(self):
         text = self.report_text()
@@ -195,28 +190,28 @@ class TestDownloadNote:
     def test_downloads_the_pdf(self, drchrono):
         assert 'NOTE-1' in pdf_text(packet.download_note(make_appointment(1)))[0]
 
-    @pytest.mark.parametrize('setup, reason', [
-        (lambda routes: None, 'no clinical note PDF'),
-        (lambda routes: routes.update({'https://files.example.test/note-1.pdf': fake_response(status=404)}),
-         "couldn't download it"),
-        (lambda routes: routes.update({'https://files.example.test/note-1.pdf': fake_response(content=b'<html>')}),
-         "isn't a PDF"),
+    @pytest.mark.parametrize('response, reason', [
+        (fake_response(status=404), "couldn't download it"),
+        (fake_response(status=401), "couldn't download it"),  # a broken link, not a sign-in problem
+        (fake_response(content=b'<html>'), "isn't a PDF"),
     ])
-    def test_problems_raise_note_error(self, setup, reason, drchrono):
-        setup(drchrono.routes)
-        visit = make_appointment(1, clinical_note={'pdf': None}) if reason == 'no clinical note PDF' else make_appointment(1)
+    def test_problems_raise_note_error(self, response, reason, drchrono):
+        drchrono.routes['https://files.example.test/note-1.pdf'] = response
 
         with pytest.raises(packet.NoteError, match=reason):
-            packet.download_note(visit)
+            packet.download_note(make_appointment(1))
+
+    def test_no_note_link(self):
+        with pytest.raises(packet.NoteError, match='no clinical note PDF'):
+            packet.download_note(make_appointment(1, clinical_note={'pdf': None}))
 
 
 class TestLoad:
     def test_fetches_everything_in_three_calls(self, drchrono):
         contents = packet.load('tok', 101, ['2', '1'])
 
-        assert api_calls(drchrono) == ['https://app.drchrono.com/api/patients/101',
-                                       'https://app.drchrono.com/api/appointments',
-                                       'https://app.drchrono.com/api/line_items']
+        assert api_calls(drchrono) == [f'{DRCHRONO}/api/patients/101', f'{DRCHRONO}/api/appointments',
+                                       f'{DRCHRONO}/api/line_items']
         assert drchrono.calls[2]['params'] == {'patient': 101}
         assert [v['id'] for v in contents['selected']] == [1, 2]  # oldest first
         assert sorted(contents['line_items']) == [1, 2]
@@ -265,7 +260,7 @@ class TestGenerateView:
         assert drchrono.calls[0]['headers'] == {'Authorization': 'Bearer valid-access-token'}
 
     def test_page_order_is_balance_then_each_visit_oldest_first(self, auth_client, drchrono):
-        pages = pdf_text(self.generate(auth_client).content)
+        pages = pdf_text(self.generate(auth_client).getvalue())
 
         assert len(pages) == 5
         assert 'Patient Account Balance' in pages[0]
@@ -278,7 +273,7 @@ class TestGenerateView:
         # Was a known bug: an empty note buffer broke the merge and the whole PDF failed.
         drchrono.routes['https://files.example.test/note-1.pdf'] = fake_response(status=404)
 
-        pages = pdf_text(self.generate(auth_client).content)
+        pages = pdf_text(self.generate(auth_client).getvalue())
 
         assert 'Not included' in pages[0] and "Mar 10, 2025 clinical note: couldn't download it" in pages[0]
         assert 'Patient Account Balance' in pages[1]
@@ -289,7 +284,7 @@ class TestGenerateView:
         drchrono.routes['/api/line_items?patient=101'] = fake_response(
             {'results': [i for i in data['line_items'] if i['appointment'] == 1], 'next': None})
 
-        pages = pdf_text(self.generate(auth_client).content)
+        pages = pdf_text(self.generate(auth_client).getvalue())
 
         assert 'May 20, 2025 claim form: no charges' in pages[0]
 
@@ -297,7 +292,7 @@ class TestGenerateView:
         many = [make_line_item(2, str(99200 + n), '10.00', service_date='2025-05-20') for n in range(7)]
         drchrono.routes['/api/line_items?patient=101'] = fake_response({'results': many, 'next': None})
 
-        pages = pdf_text(self.generate(auth_client, selected=['2']).content)
+        pages = pdf_text(self.generate(auth_client, selected=['2']).getvalue())
 
         assert len(pages) == 4  # balance, note, two claim forms
 
