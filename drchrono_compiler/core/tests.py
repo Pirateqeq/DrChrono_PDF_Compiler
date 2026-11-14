@@ -38,14 +38,6 @@ class TestGet:
         assert call['params'] == {'verbose': 'true'}
         assert call['timeout'] == 10
 
-    def test_full_url_used_as_is(self, api):
-        api.routes['/api/line_items?cursor=abc'] = page([])
-
-        drchrono.get('tok', 'https://app.drchrono.com/api/line_items?cursor=abc')
-
-        assert api.calls[0]['url'] == 'https://app.drchrono.com/api/line_items?cursor=abc'
-        assert api.calls[0]['params'] == {}
-
     @pytest.mark.parametrize('status', [401, 404, 429, 500])
     def test_http_error_carries_status(self, status, api):
         api.routes['/api/patients/101'] = fake_response({}, status=status)
@@ -69,6 +61,16 @@ class TestGetAll:
 
         assert drchrono.get_all('tok', '/api/line_items', patient=101) == [1, 2, 3, 4]
         assert [c['params'] for c in api.calls] == [{'patient': 101}, {}, {}]
+        assert [c['url'] for c in api.calls][1:] == [
+            'https://app.drchrono.com/api/line_items?cursor=p2', 'https://app.drchrono.com/api/line_items?cursor=p3']
+
+    def test_next_link_on_another_host_stays_on_drchrono(self, api):
+        api.routes['/api/line_items'] = page([1], 'https://elsewhere.example/steal?cursor=2')
+        api.routes['/steal?cursor=2'] = page([2])
+
+        drchrono.get_all('tok', '/api/line_items')
+
+        assert api.calls[1]['url'] == 'https://app.drchrono.com/steal?cursor=2'
 
 
 # ── Endpoint helpers ──────────────────────────────────────────────────────────
@@ -85,19 +87,22 @@ class TestHelpers:
         assert api.calls[0]['params'] == {'verbose': 'true'}
 
     @pytest.mark.parametrize('filters', [{'appointment': 5}, {'patient': 101}])
-    def test_line_items_filters_and_pages(self, filters, api):
-        api.routes['/api/line_items'] = page([make_line_item(5)], 'https://app.drchrono.com/api/line_items?cursor=2')
-        api.routes['/api/line_items?cursor=2'] = page([make_line_item(6)])
+    def test_line_items_filters(self, filters, api):
+        api.routes['/api/line_items'] = page([make_line_item(5)])
 
-        assert drchrono.line_items('tok', **filters) == [make_line_item(5), make_line_item(6)]
+        assert drchrono.line_items('tok', **filters) == [make_line_item(5)]
         assert api.calls[0]['params'] == filters
 
 
 # ── eligible_appointments ─────────────────────────────────────────────────────
 
-def eligible_ids(api, visits):
+def eligible(api, visits):
     api.routes['/api/appointments'] = page(visits)
-    return [a['id'] for a in drchrono.eligible_appointments('tok', 101)]
+    return drchrono.eligible_appointments('tok', 101)
+
+
+def eligible_ids(api, visits):
+    return [a['id'] for a in eligible(api, visits)]
 
 
 class TestEligibleAppointments:
@@ -135,9 +140,7 @@ class TestEligibleAppointments:
         appt = make_appointment(1, days_ago(5))
         appt['date'] = appt.pop('scheduled_time')[:10]
 
-        api.routes['/api/appointments'] = page([appt])
-
-        result = drchrono.eligible_appointments('tok', 101)
+        result = eligible(api, [appt])
 
         assert [a['id'] for a in result] == [1]
         assert result[0]['scheduled_time'] == datetime.fromisoformat(appt['date'])
@@ -154,9 +157,8 @@ class TestEligibleAppointments:
 
     def test_newest_first_with_parsed_times_and_api_data_unchanged(self, api):
         visits = [make_appointment(1, days_ago(30)), make_appointment(2, days_ago(2)), make_appointment(3, days_ago(10))]
-        api.routes['/api/appointments'] = page(visits)
 
-        result = drchrono.eligible_appointments('tok', 101)
+        result = eligible(api, visits)
 
         assert [a['id'] for a in result] == [2, 3, 1]
         assert all(isinstance(a['scheduled_time'], datetime) for a in result)

@@ -1,5 +1,6 @@
 """DrChrono API client: every DrChrono data call except sign-in goes through here."""
 from datetime import date, datetime, timedelta
+from urllib.parse import urlsplit
 
 import requests
 
@@ -14,11 +15,10 @@ class DrChronoError(Exception):
         self.status = status
 
 
-def get(token, path_or_url, **params):
-    """One GET; takes an API path or a full `next` page URL (which already carries its query)."""
-    url = path_or_url if path_or_url.startswith('https://') else DRCHRONO + path_or_url
+def get(token, path, **params):
+    """One GET to a DrChrono API path (which may carry its own query string, like a `next` link)."""
     try:
-        resp = requests.get(url, headers={'Authorization': f'Bearer {token}'}, params=params, timeout=10)
+        resp = requests.get(DRCHRONO + path, headers={'Authorization': f'Bearer {token}'}, params=params, timeout=10)
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as e:
@@ -30,7 +30,9 @@ def get_all(token, path, **params):
     page = get(token, path, **params)
     results = page['results']
     while page.get('next'):
-        page = get(token, page['next'])
+        # `next` is a full URL; reuse only its path and query so the token is only ever sent to DrChrono.
+        next_url = urlsplit(page['next'])
+        page = get(token, f'{next_url.path}?{next_url.query}')
         results += page['results']
     return results
 

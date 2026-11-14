@@ -10,10 +10,11 @@ from django.db import transaction
 from django.shortcuts import redirect
 from django.utils import timezone
 
+from core.drchrono import DRCHRONO
+
 from .exceptions import DrChronoAuthError
 from .models import DrChronoCredential
 
-DRCHRONO = 'https://app.drchrono.com'
 
 
 def authorize_url(state):

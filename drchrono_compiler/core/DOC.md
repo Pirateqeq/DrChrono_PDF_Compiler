@@ -8,9 +8,9 @@ Callers pass the access token that [`require_auth`](../verify/DOC.md) puts on `r
 
 ### Requests and errors
 
-- **`get(token, path_or_url, **params)`** — The one place that calls DrChrono for data. Prefixes `https://app.drchrono.com` (unless given a full URL), adds `Authorization: Bearer <token>`, sends `params` as the query string, and uses a 10-second timeout.
+- **`get(token, path, **params)`** — The one place that calls DrChrono for data. Prefixes `https://app.drchrono.com` (`DRCHRONO`, the app's only copy of the address; `verify` imports it), adds `Authorization: Bearer <token>`, sends `params` as the query string, and uses a 10-second timeout. It only takes paths, so the token can only ever go to DrChrono.
 - **`DrChronoError`** — Raised for any failure: network error, timeout, non-2xx status or unreadable reply. `.status` is the HTTP status code (401, 403, 404, 429, 5xx…), or `None` when DrChrono never answered. Callers decide what each status means for the user (see `search/services.py`).
-- **`get_all(token, path, **params)`** — For list endpoints. DrChrono returns `{"previous", "results", "next"}` with `next` set to the full URL of the next page (query already included), so it keeps calling `get` on `next` until it's empty and returns every `results` item.
+- **`get_all(token, path, **params)`** — For list endpoints. DrChrono returns `{"previous", "results", "next"}` with `next` set to the full URL of the next page (query already included). It keeps requesting the path and query of `next` (never its host) until `next` is empty, and returns every `results` item.
 
 ### Endpoint helpers
 

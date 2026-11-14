@@ -8,7 +8,8 @@ import requests
 from django.contrib.messages import get_messages
 from reportlab.pdfgen import canvas
 
-DRCHRONO_HOST = 'https://app.drchrono.com'
+from core.drchrono import DRCHRONO
+
 
 
 def fake_response(json_data=None, status=200, content=b''):
@@ -42,9 +43,9 @@ class FakeDrChrono:
 
     def get(self, url, headers=None, params=None, timeout=None):
         self.calls.append({'url': url, 'headers': headers, 'params': params, 'timeout': timeout})
-        path = url.removeprefix(DRCHRONO_HOST)
+        path = url.removeprefix(DRCHRONO)
         query = urlencode(params or {})
-        for key in (f'{path}?{query}', path) if query else (path,):
+        for key in (f'{path}?{query}', path):  # `path?` never matches a route, so no-param calls fall through
             if key in self.routes:
                 return self.routes[key]
         raise AssertionError(f'Unexpected DrChrono request: {url} {params or ""}')
