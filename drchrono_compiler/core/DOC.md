@@ -8,7 +8,9 @@ Callers pass the access token that [`require_auth`](../verify/DOC.md) puts on `r
 
 ### Requests and errors
 
+- **`session`** — One `requests.Session` per worker process. `get` and `download` use it, so requests after the first reuse the connection instead of a new TCP/TLS setup (about 0.1–0.4 s each). Gunicorn's sync workers handle one request at a time, so sharing it is safe.
 - **`get(token, path, **params)`** — The one place that calls DrChrono for data. Prefixes `https://app.drchrono.com` (`DRCHRONO`, the app's only copy of the address; `verify` imports it), adds `Authorization: Bearer <token>`, sends `params` as the query string, and uses a 10-second timeout. It only takes paths, so the token can only ever go to DrChrono.
+- **`download(url)`** — Fetches a file DrChrono links to (a clinical note PDF) through the same session: no auth header, 15-second timeout. Any failure, including a 401 from the file host, raises `DrChronoError`, never `DrChronoAuthError`, because a broken file link isn't an expired sign-in.
 - **`DrChronoError`** — Raised for any failure except a rejected token: network error, timeout, non-2xx status or unreadable reply. `.status` is the HTTP status code (403, 404, 429, 5xx…), or `None` when DrChrono never answered. Callers show `user_message(e)`.
 - **`DrChronoAuthError`** — Raised instead for a 401 (DrChrono rejected the token), and by `verify` when sign-in or a token refresh fails. It is deliberately **not** a `DrChronoError`, so a view's `except DrChronoError` can't swallow it: it reaches [`require_auth`](../verify/DOC.md), which sends the user to sign in.
 - **`user_message(error)`** — Plain-English text for a `DrChronoError`, by status: none → "DrChrono isn't responding. Try again in a moment."; 403 → no permission; 404 → record not found; 429 → hourly limit reached, try after the top of the hour; anything else → "DrChrono returned an error. Try again in a moment."
@@ -21,6 +23,8 @@ Callers pass the access token that [`require_auth`](../verify/DOC.md) puts on `r
 | `patient(token, patient_id)` | `GET /api/patients/{id}` | Demographics for the balance report and HCFA form. |
 | `appointment(token, appt_id)` | `GET /api/appointments/{id}?verbose=true` | `verbose` adds `clinical_note`. |
 | `line_items(token, **filters)` | `GET /api/line_items` | Pass `appointment=` or `patient=`; every page is read. |
+| `by_visit(line_items)` | — | Line items grouped by visit ID **as text** (a missing visit gives `[]`). DrChrono sends a visit's `id` as text but a line item's `appointment` as a number, so comparing them as-is matches nothing (every visit once looked like it had no charges). Used by the appointment list and `pdf`. |
+| `note_pdf_url(appt)` | — | The clinical note's PDF URL (`{'pdf': url}` or the URL itself), or `None`. Used by eligibility and by `pdf`'s downloads. |
 | `eligible_appointments(token, patient_id)` | `GET /api/appointments` | See below. |
 
 ### `eligible_appointments`
@@ -47,8 +51,8 @@ Test-only helpers imported by every app's `tests.py`:
 
 - `make_patient`, `make_appointment`, `make_line_item`, `make_pdf_bytes` — fake DrChrono records and PDFs.
 - `fake_response(json_data, status, content)` — stand-in for `requests.Response` (`.json()`, `.content`, `.raise_for_status()`).
-- `FakeDrChrono(routes)` — stands in for `requests.get`. Patch `core.drchrono.requests.get` with its `.get` (or replace a module's `requests` with it, as `pdf` does for note downloads). Routes are keyed by URL without the host:
-  - a key with a query (`'/api/line_items?appointment=1'`) matches that path with exactly those params
+- `FakeDrChrono(routes)` — stands in for `requests.get`. Patch `core.drchrono.session.get` with its `.get`; that covers DrChrono API calls and clinical-note downloads, which share the session. Routes are keyed by URL without the host:
+  - a key with a query (`'/api/line_items?patient=101'`) matches that path with exactly those params
   - a bare path (`'/api/appointments'`) matches any params
   - full URLs work for other hosts (clinical note files)
   - unknown URLs fail the test; every call is recorded in `.calls`

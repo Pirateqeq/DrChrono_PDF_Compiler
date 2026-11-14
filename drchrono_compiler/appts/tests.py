@@ -5,21 +5,23 @@ import pytest
 from django.urls import reverse
 
 from core.drchrono import DrChronoAuthError, DrChronoError
-from core.testing import make_appointment, make_patient, message_texts
+from core.testing import make_appointment, make_line_item, make_patient, message_texts
 
 LIST_URL = reverse('appts_app:historical_list', kwargs={'patient_id': 101})
 
 
 @pytest.fixture
 def drchrono():
-    """Patch the two DrChrono calls the list makes."""
+    """Patch the three DrChrono calls the list makes. Both visits have charges."""
+    # As DrChrono sends them: a visit's id is text, a line item's appointment is a number.
     visits = [
-        make_appointment(2, datetime(2025, 3, 10, 9, 30), reason='Low back pain'),
-        make_appointment(1, datetime(2024, 11, 2, 14, 0), reason=None),
+        make_appointment('2', datetime(2025, 3, 10, 9, 30), reason='Low back pain'),
+        make_appointment('1', datetime(2024, 11, 2, 14, 0), reason=None),
     ]
     with patch('appts.views.drchrono.patient', return_value=make_patient()) as patient, \
-            patch('appts.views.drchrono.eligible_appointments', return_value=visits) as appointments:
-        yield patient, appointments
+            patch('appts.views.drchrono.eligible_appointments', return_value=visits) as appointments, \
+            patch('appts.views.drchrono.line_items', return_value=[make_line_item(1), make_line_item(2)]) as items:
+        yield patient, appointments, items
 
 
 class TestAppointmentList:
@@ -30,7 +32,7 @@ class TestAppointmentList:
         assert LIST_URL == '/appts/patient/101/'
 
     def test_lists_visits_with_ticked_checkboxes(self, auth_client, drchrono):
-        patient, appointments = drchrono
+        patient, appointments, items = drchrono
 
         html = auth_client.get(LIST_URL).content.decode()
 
@@ -42,6 +44,17 @@ class TestAppointmentList:
         assert 'value="2" checked' in html and 'value="1" checked' in html
         assert patient.call_args.args == ('valid-access-token', 101)
         assert appointments.call_args.args == ('valid-access-token', 101)
+        assert items.call_args.kwargs == {'patient': 101}
+        assert 'No charges' not in html
+
+    def test_visit_without_charges_is_tagged(self, auth_client, drchrono):
+        _, _, items = drchrono
+        items.return_value = [make_line_item(1)]
+
+        html = auth_client.get(LIST_URL).content.decode()
+
+        assert html.count('>No charges</span>') == 1
+        assert html.index('Mar 10, 2025') < html.index('>No charges</span>') < html.index('Nov 02, 2024')
 
     def test_form_posts_to_pdf_without_patient_name(self, auth_client, drchrono):
         html = auth_client.get(LIST_URL).content.decode()
@@ -51,8 +64,8 @@ class TestAppointmentList:
 
     @pytest.mark.parametrize('status, text', [(None, "isn't responding"), (404, "couldn't find that record")])
     def test_drchrono_error_shows_plain_message(self, status, text, auth_client, drchrono):
-        _, appointments = drchrono
-        appointments.side_effect = DrChronoError('x', status)
+        _, _, items = drchrono
+        items.side_effect = DrChronoError('x', status)
 
         response = auth_client.get(LIST_URL)
 
@@ -61,7 +74,7 @@ class TestAppointmentList:
         assert b'No historical appointments found for this patient.' in response.content
 
     def test_rejected_token_goes_to_sign_in(self, auth_client, drchrono):
-        patient, _ = drchrono
+        patient, _, _ = drchrono
         patient.side_effect = DrChronoAuthError('rejected')
 
         response = auth_client.get(LIST_URL)

@@ -30,7 +30,7 @@ All code lives in `drchrono_compiler/`. See [`SYSTEM_MAP.md`](SYSTEM_MAP.md) for
 
 ## Local setup
 
-Requires Python 3.11+. Run everything from `drchrono_compiler/` (the HCFA template is loaded by relative path).
+Requires Python 3.11+. Run the commands below from `drchrono_compiler/` (where `manage.py` is).
 
 ```bash
 cd drchrono_compiler
@@ -120,6 +120,6 @@ Render terminates TLS; settings force HTTPS, secure cookies, and HSTS when `DEBU
 | `GET /api/patients_summary` | Patient search (`search`, through `core`) |
 | `GET /api/appointments` | Appointment history, every page (`core`) |
 | `GET /api/appointments/{id}` | Single appointment (`core`) |
-| `GET /api/line_items?appointment={id}` | Billing line items, every page (`core`) |
+| `GET /api/line_items?patient={id}` | All of a patient's billing line items, every page, once per PDF (`core`, `pdf`) |
 | `GET /api/patients/{id}` | Patient demographics (`core`) |
 | Clinical note `pdf` URL | Clinical note download (`pdf`) |

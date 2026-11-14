@@ -37,4 +37,4 @@ The view catches `DrChronoError`:
 
 ## Tests (`tests.py`)
 
-`search_patients` and the views run against `FakeDrChrono` (patched on `core.drchrono.requests.get`): the parameters sent, slimming, the `more` flag, the session contents, no matches, a plain message for errors, and sign-in for a 401.
+`search_patients` and the views run against `FakeDrChrono` (patched on `core.drchrono.session.get`): the parameters sent, slimming, the `more` flag, the session contents, no matches, a plain message for errors, and sign-in for a 401.

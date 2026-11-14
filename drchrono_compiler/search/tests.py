@@ -49,7 +49,7 @@ class TestPatientSearchForm:
 @pytest.fixture
 def api():
     fake = FakeDrChrono({'/api/patients_summary': fake_response({'results': [make_patient()], 'next': None})})
-    with patch('core.drchrono.requests.get', fake.get):
+    with patch('core.drchrono.session.get', fake.get):
         yield fake
 
 

@@ -1,10 +1,14 @@
 """DrChrono API client: every DrChrono data call except sign-in goes through here."""
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit
 
 import requests
 
 DRCHRONO = 'https://app.drchrono.com'
+# One connection pool per worker process: every request after the first skips the TCP/TLS setup
+# (about 0.1-0.4 s each). Gunicorn's sync workers handle one request at a time, so sharing it is safe.
+session = requests.Session()
 
 
 class DrChronoAuthError(Exception):
@@ -25,7 +29,7 @@ class DrChronoError(Exception):
 def get(token, path, **params):
     """One GET to a DrChrono API path (which may carry its own query string, like a `next` link)."""
     try:
-        resp = requests.get(DRCHRONO + path, headers={'Authorization': f'Bearer {token}'}, params=params, timeout=10)
+        resp = session.get(DRCHRONO + path, headers={'Authorization': f'Bearer {token}'}, params=params, timeout=10)
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as e:
@@ -70,6 +74,36 @@ def line_items(token, **filters):
     return get_all(token, '/api/line_items', **filters)
 
 
+def by_visit(line_items):
+    """Line items grouped by visit ID as text (missing visits give an empty list).
+
+    DrChrono sends a visit's own `id` as text but a line item's `appointment` as a number, so both
+    sides are compared as text: look visits up with `str(visit['id'])`.
+    """
+    grouped = defaultdict(list)
+    for item in line_items:
+        grouped[str(item['appointment'])].append(item)
+    return grouped
+
+
+def download(url):
+    """A file DrChrono links to, such as a clinical note PDF. These links need no auth header, and a 401
+    from the file host is a broken link, not an expired sign-in, so it stays a plain DrChronoError."""
+    try:
+        resp = session.get(url, timeout=15)
+        resp.raise_for_status()
+        return resp.content
+    except requests.RequestException as e:
+        raise DrChronoError(f'Download failed: {e}', getattr(e.response, 'status_code', None)) from e
+
+
+def note_pdf_url(appt):
+    """The clinical note PDF's URL; DrChrono gives either {'pdf': url} or the URL itself."""
+    note = appt.get('clinical_note')
+    url = note.get('pdf') if isinstance(note, dict) else note
+    return url if str(url).startswith('http') else None
+
+
 def eligible_appointments(token, patient_id):
     """Past, attended visits from the last 3 years that have a clinical note PDF, newest first."""
     today = date.today()
@@ -78,11 +112,9 @@ def eligible_appointments(token, patient_id):
     eligible = []
     for appt in visits:
         scheduled = appt.get('scheduled_time') or appt.get('date')
-        note = appt.get('clinical_note')
-        pdf_url = note.get('pdf') if isinstance(note, dict) else note
         attended = appt.get('status') not in ('Rescheduled', 'Cancelled', 'No Show')
         in_past = bool(scheduled) and scheduled[:10] <= today.isoformat()
-        has_note = str(pdf_url).startswith('http')
+        has_note = note_pdf_url(appt) is not None
         if attended and in_past and has_note:
             # A copy, so DrChrono's data isn't changed; the list template formats the parsed datetime.
             eligible.append({**appt, 'scheduled_time': datetime.fromisoformat(scheduled)})

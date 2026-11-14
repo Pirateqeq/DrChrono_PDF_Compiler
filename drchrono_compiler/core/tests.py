@@ -15,9 +15,9 @@ def days_ago(n):
 
 @pytest.fixture
 def api():
-    """FakeDrChrono standing in for requests.get; add routes per test."""
+    """FakeDrChrono standing in for the shared session's get; add routes per test."""
     fake = FakeDrChrono({})
-    with patch('core.drchrono.requests.get', fake.get):
+    with patch('core.drchrono.session.get', fake.get):
         yield fake
 
 
@@ -68,7 +68,7 @@ class TestGet:
         assert exc.value.status == status
 
     def test_network_error_has_no_status(self):
-        with patch('core.drchrono.requests.get', side_effect=requests.ConnectionError('down')):
+        with patch('core.drchrono.session.get', side_effect=requests.ConnectionError('down')):
             with pytest.raises(DrChronoError) as exc:
                 drchrono.get('tok', '/api/patients/101')
         assert exc.value.status is None
@@ -113,6 +113,13 @@ class TestHelpers:
 
         assert drchrono.line_items('tok', **filters) == [make_line_item(5)]
         assert api.calls[0]['params'] == filters
+
+    def test_by_visit_groups_by_visit_id_as_text(self):
+        # DrChrono: a visit's id is text ("5"), a line item's appointment is a number (5).
+        grouped = drchrono.by_visit([make_line_item(5, '99213'), make_line_item(6), make_line_item(5, '97140')])
+
+        assert [i['code'] for i in grouped['5']] == ['99213', '97140']
+        assert grouped['7'] == []
 
 
 # ── eligible_appointments ─────────────────────────────────────────────────────

@@ -4,8 +4,8 @@ from unittest.mock import patch
 import pytest
 from django.urls import reverse
 from pypdf import PdfReader
-from reportlab.pdfgen.canvas import Canvas
 
+from core.drchrono import DRCHRONO, by_visit
 from core.testing import (
     FakeDrChrono,
     fake_response,
@@ -15,16 +15,19 @@ from core.testing import (
     make_pdf_bytes,
     message_texts,
 )
-from pdf.services import (
-    fetch_hcfa_data,
-    generate_balance_report,
-    generate_clinical_notes,
-    generate_hcfa_bill,
+from pdf.golden import (
+    BALANCE_REPORT_GOLDEN,
+    CLAIM_FORM_GOLDEN,
+    GOLDEN_BALANCE_ITEMS,
+    GOLDEN_BALANCE_VISITS,
+    GOLDEN_CHARGES,
+    GOLDEN_VISIT,
+    record_drawing,
 )
+from pdf import balance, hcfa, packet
 
 GENERATE_URL = reverse('pdf_app:generate_selected', kwargs={'patient_id': 101})
 LIST_URL = reverse('appts_app:historical_list', kwargs={'patient_id': 101})
-HCFA_HEIGHT = 800
 
 
 def pdf_text(data):
@@ -33,221 +36,238 @@ def pdf_text(data):
 
 
 def two_visits():
-    """Visit 1 (older, two charges, one already paid) and visit 2 (newer, one charge)."""
+    """Visit 1 (older: one unpaid charge, one paid) and visit 2 (newer: one charge)."""
     return {
         'patient': make_patient(),
-        'appointments': [make_appointment(2, '2025-05-20T10:00:00'), make_appointment(1, '2025-03-10T09:30:00')],
-        'line_items': {
-            1: [make_line_item(1, '99213', '150.00'),
-                make_line_item(1, '97140', '40.00', balance_total='0.00')],
-            2: [make_line_item(2, '98940', '75.50', service_date='2025-05-20')],
-        },
+        # As DrChrono sends them: a visit's id is text, a line item's appointment is a number.
+        'appointments': [dict(visit, id=str(visit['id'])) for visit in GOLDEN_BALANCE_VISITS],
+        'line_items': [make_line_item(1, '99213', '150.00'), make_line_item(1, '97140', '40.00', balance_total='0.00'),
+                       make_line_item(2, '98940', '75.50', service_date='2025-05-20')],
     }
 
 
 def drchrono_routes(data):
     routes = {
         '/api/patients/101': fake_response(data['patient']),
-        '/api/appointments': fake_response({'results': data['appointments']}),
+        '/api/appointments': fake_response({'results': data['appointments'], 'next': None}),
+        '/api/line_items?patient=101': fake_response({'results': data['line_items'], 'next': None}),
     }
     for appt in data['appointments']:
-        appt_id = appt['id']
-        routes[f'/api/appointments/{appt_id}?verbose=true'] = fake_response(appt)
-        routes[f'/api/line_items?appointment={appt_id}'] = fake_response({'results': data['line_items'][appt_id]})
-        routes[appt['clinical_note']['pdf']] = fake_response(content=make_pdf_bytes(f'NOTE-{appt_id}'))
+        routes[appt['clinical_note']['pdf']] = fake_response(content=make_pdf_bytes(f"NOTE-{appt['id']}"))
     return routes
 
 
 @pytest.fixture
 def drchrono():
-    """Fake DrChrono for everything under pdf/. Edit `.routes` to change a response."""
+    """Fake DrChrono (API and note files) on the shared session. Edit `.routes` to change a response."""
     fake = FakeDrChrono(drchrono_routes(two_visits()))
-    with patch('core.drchrono.requests.get', fake.get), patch('pdf.services.requests', fake):
+    with patch('core.drchrono.session.get', fake.get):
         yield fake
 
 
-@pytest.fixture
-def drawn():
-    """Record every Canvas.drawString call as {(x, y): text}."""
-    calls = {}
-    original = Canvas.drawString
-
-    def record(self, x, y, text, *args, **kwargs):
-        calls[(x, y)] = text
-        return original(self, x, y, text, *args, **kwargs)
-
-    with patch.object(Canvas, 'drawString', record):
-        yield calls
+def api_calls(fake):
+    return [c['url'] for c in fake.calls if c['url'].startswith(DRCHRONO)]
 
 
-def hcfa_data(**patient_overrides):
-    data = two_visits()
-    return fetch_hcfa_data(make_patient(**patient_overrides), make_appointment(1), data['line_items'][1])
+# ── Golden output: the overhaul must reproduce today's documents ──────────────
+
+class TestGoldenOutput:
+    def test_claim_form_drawing_unchanged(self):
+        drawn = record_drawing(lambda: hcfa.claim_forms(make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES))
+        assert drawn == CLAIM_FORM_GOLDEN
+
+    def test_balance_report_text_unchanged(self):
+        report = balance.balance_report(make_patient(), GOLDEN_BALANCE_VISITS, by_visit(GOLDEN_BALANCE_ITEMS))
+        assert pdf_text(report)[0] == BALANCE_REPORT_GOLDEN
 
 
-# ── fetch_hcfa_data ───────────────────────────────────────────────────────────
+# ── hcfa ──────────────────────────────────────────────────────────────────────
 
-class TestFetchHcfaData:
-    def test_maps_patient_and_visit_fields(self):
-        data = hcfa_data()
-
-        assert data['first_name'] == 'Jane'
-        assert data['last_name'] == 'Doe'
-        assert data['dob'] == '1980-04-15'
-        assert data['gender'] == 'Female'
-        assert (data['address'], data['city'], data['state'], data['zip']) == \
-            ('123 Main St', 'Springfield', 'IL', '62701')
-        assert data['icd10_codes'] == ['M54.5']
-        assert data['signature_date'] == '2025-03-10T12:00:00'
-
-    def test_reads_practice_details_from_env(self):
-        data = hcfa_data()
-
-        assert data['provider_npi'] == '1234567890'
-        assert data['federal_id'] == '12-3456789'
-        assert data['account_number'] == 'ACCT-42'
-        assert data['physician_signature'] == 'Dr. Sam Smith'
-        assert data['provider_number'] == '217 555-0199'
-
-    def test_formats_phone_number(self):
-        assert hcfa_data()['number'] == '217 555 0123'
-
-    def test_collects_line_items_in_order(self):
-        data = hcfa_data()
-
-        assert data['code'] == ['99213', '97140']
-        assert data['charges'] == ['150.00', '40.00']
-        assert data['service_date'] == ['2025-03-10', '2025-03-10']
-        assert data['diagnosis_pointer'] == [[1], [1]]
-
-    def test_missing_fields_are_all_listed(self, monkeypatch):
-        monkeypatch.delenv('PROVIDER_NPI')
-
-        with pytest.raises(Exception) as exc:
-            hcfa_data(zip_code='', city=None)
-
-        errors = exc.value.args[0]
-        assert 'Missing Patient Zip' in errors
-        assert 'Missing Patient City' in errors
-        assert 'Missing Patient Provider Npi' in errors
+def charges(count):
+    return [make_line_item(1, str(99200 + n), f'{10 + n}.00') for n in range(count)]
 
 
-# ── generate_hcfa_bill ────────────────────────────────────────────────────────
+class TestClaimForms:
+    def test_one_page_form_on_the_template(self):
+        forms = hcfa.claim_forms(make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES)
 
-class TestGenerateHcfaBill:
-    def test_one_page_with_claim_details(self):
-        pages = pdf_text(generate_hcfa_bill(None, hcfa_data()))
-
+        assert len(forms) == 1
+        pages = pdf_text(forms[0])
         assert len(pages) == 1
-        for expected in ['Doe, Jane', '123 Main St', '62701', '555-0123', 'M54.5', '99213', '97140',
-                         '1234567890', '12-3456789', 'ACCT-42', 'Signature on File', '03/10/2025',
-                         'Dr. Sam Smith', '500 Oak Ave']:
-            assert expected in pages[0], expected
+        assert 'FORM 1500' in pages[0] and 'Doe, Jane' in pages[0]  # template text plus the overlay
 
-    def test_total_charge_is_sum_of_line_items(self, drawn):
-        generate_hcfa_bill(None, hcfa_data())
+    def test_more_than_six_charges_continue_on_another_form(self):
+        forms = []
+        drawn = record_drawing(lambda: forms.extend(hcfa.claim_forms(make_patient(), GOLDEN_VISIT, charges(7))))
 
-        assert drawn[(390, HCFA_HEIGHT - 698)] == '190'
-        assert drawn[(443, HCFA_HEIGHT - 698)] == '00'
+        codes = sorted(text for x, y, text in drawn if x == hcfa.LINE_X['code'])
+        assert codes == [str(99200 + n) for n in range(7)]
+        totals = [text for x, y, text in drawn if (x, y) == (390, hcfa.PAGE_HEIGHT - 698)]  # box 28
+        assert sorted(totals) == ['16', '75']  # 10+11+...+15 on the first form, 16 on the second
+        assert len(forms) == 2
 
-    def test_one_service_row_per_line_item(self, drawn):
-        generate_hcfa_bill(None, hcfa_data())
-
-        assert drawn[(210, HCFA_HEIGHT - 555)] == '99213'
-        assert drawn[(210, HCFA_HEIGHT - 579)] == '97140'
-        assert (210, HCFA_HEIGHT - 603) not in drawn
-
-    @pytest.mark.parametrize('gender, x', [('Female', 360), ('Male', 324)])
-    def test_sex_checkbox(self, gender, x, drawn):
-        generate_hcfa_bill(None, hcfa_data(gender=gender))
-        assert drawn[(x, HCFA_HEIGHT - 148)] == '✓'
+    def test_six_charges_fit_one_form(self):
+        assert len(hcfa.claim_forms(make_patient(), GOLDEN_VISIT, charges(6))) == 1
 
     def test_phone_without_area_code(self):
-        # Known bug: a phone number that isn't exactly 10 digits isn't split into
-        # area code and number, and drawing it raises IndexError.
-        pages = pdf_text(generate_hcfa_bill(None, hcfa_data(cell_phone='555-0123')))
-        assert 'Doe, Jane' in pages[0]
+        # Was a known bug: a phone number that isn't 10 digits raised IndexError.
+        drawn = record_drawing(lambda: hcfa.claim_forms(make_patient(cell_phone='555-0123'), GOLDEN_VISIT, GOLDEN_CHARGES))
+
+        assert (162, hcfa.PAGE_HEIGHT - 221, '555-0123') in drawn
+        assert not any(x == 134 and y == hcfa.PAGE_HEIGHT - 221 for x, y, _ in drawn)
+
+    @pytest.mark.parametrize('gender, x', [('Female', 360), ('Male', 324)])
+    def test_sex_checkbox(self, gender, x):
+        drawn = record_drawing(lambda: hcfa.claim_forms(make_patient(gender=gender), GOLDEN_VISIT, GOLDEN_CHARGES))
+        assert (x, hcfa.PAGE_HEIGHT - 148, '✓') in drawn
+
+    @pytest.mark.parametrize('visit, items, reason', [
+        ({**GOLDEN_VISIT, 'icd10_codes': []}, GOLDEN_CHARGES, 'no ICD-10 diagnosis codes'),
+        ({**GOLDEN_VISIT, 'clinical_note': {'pdf': 'https://x/n.pdf'}}, GOLDEN_CHARGES, 'no signature date'),
+    ])
+    def test_visit_problems_raise_claim_error(self, visit, items, reason):
+        with pytest.raises(hcfa.ClaimError, match=reason):
+            hcfa.claim_forms(make_patient(), visit, items)
+
+    def test_inputs_unchanged(self):
+        patient, visit, items = make_patient(), dict(GOLDEN_VISIT), [dict(c) for c in GOLDEN_CHARGES]
+
+        hcfa.claim_forms(patient, visit, items)
+
+        assert (patient, visit, items) == (make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES)
+
+    def test_no_pypdf_deprecation_warning(self, recwarn):
+        hcfa.claim_forms(make_patient(), GOLDEN_VISIT, GOLDEN_CHARGES)
+        assert not [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
+
+
+class TestMissingDetails:
+    def test_complete_patient_and_practice(self):
+        assert hcfa.missing_details(make_patient()) == []
+
+    def test_lists_everything_missing(self, monkeypatch):
+        monkeypatch.delenv('PROVIDER_NPI')
+
+        assert hcfa.missing_details(make_patient(zip_code='', city=None)) == [
+            'patient city', 'patient zip code', 'practice setting PROVIDER_NPI']
 
 
 # ── generate_balance_report ───────────────────────────────────────────────────
 
-class TestGenerateBalanceReport:
-    def test_totals_unpaid_line_items(self, drchrono):
-        text = pdf_text(generate_balance_report(101, 'tok'))[0]
+class TestBalanceReport:
+    def report_text(self, visits=GOLDEN_BALANCE_VISITS, items=GOLDEN_BALANCE_ITEMS):
+        return pdf_text(balance.balance_report(make_patient(), visits, by_visit(items)))[0]
 
-        assert 'Patient Account Balance' in text
-        assert 'Provider: Springfield Chiropractic' in text
-        assert 'Patient: Doe, Jane' in text
-        assert '$225.50' in text
-        assert '99213' in text and '98940' in text
-        assert '97140' not in text
-        assert drchrono.calls[0]['headers'] == {'Authorization': 'Bearer tok'}
+    def test_totals_unpaid_charges_and_skips_paid_ones(self):
+        text = self.report_text()
 
-    def test_newest_line_items_first(self, drchrono):
-        text = pdf_text(generate_balance_report(101, 'tok'))[0]
+        assert 'Patient: Doe, Jane' in text and 'Provider: Springfield Chiropractic' in text
+        assert '$396.00' in text  # 150 + 45 + 60 + 40 + 25.50 + 75.50
+        assert '97750' not in text  # balance 0.00
+
+    def test_newest_charges_first(self):
+        text = self.report_text()
         assert text.index('May 20, 2025') < text.index('Mar 10, 2025')
 
-    def test_no_balance_due(self, drchrono):
-        drchrono.routes['/api/appointments'] = fake_response({'results': []})
-
-        text = pdf_text(generate_balance_report(101, 'tok'))[0]
+    def test_no_balance_due(self):
+        text = self.report_text(items=[])
 
         assert '$0.00' in text
         assert 'No billable transactions found.' in text
 
-    def test_default_provider_name(self, drchrono, monkeypatch):
+    def test_default_provider_name(self, monkeypatch):
         monkeypatch.delenv('PROVIDER_NAME')
-        assert 'Provider: Unknown Provider' in pdf_text(generate_balance_report(101, 'tok'))[0]
+        assert 'Provider: Unknown Provider' in self.report_text()
+
+    def test_zero_written_differently_counts_as_paid(self):
+        items = [make_line_item(1, '99213', '150.00', balance_total='0')]
+        assert 'No billable transactions found.' in self.report_text(items=items)
 
 
-# ── generate_clinical_notes ───────────────────────────────────────────────────
+# ── packet ────────────────────────────────────────────────────────────────────
 
-class TestGenerateClinicalNotes:
-    def test_downloads_note(self, drchrono, make_request):
-        note = generate_clinical_notes(make_request(), make_appointment(1))
-        assert 'NOTE-1' in pdf_text(note)[0]
+class TestDownloadNote:
+    def test_downloads_the_pdf(self, drchrono):
+        assert 'NOTE-1' in pdf_text(packet.download_note(make_appointment(1)))[0]
 
-    def test_missing_note_link_warns(self, drchrono, make_request):
-        request = make_request()
+    @pytest.mark.parametrize('response, reason', [
+        (fake_response(status=404), "couldn't download it"),
+        (fake_response(status=401), "couldn't download it"),  # a broken link, not a sign-in problem
+        (fake_response(content=b'<html>'), "isn't a PDF"),
+    ])
+    def test_problems_raise_note_error(self, response, reason, drchrono):
+        drchrono.routes['https://files.example.test/note-1.pdf'] = response
 
-        note = generate_clinical_notes(request, make_appointment(1, clinical_note={'pdf': None}))
+        with pytest.raises(packet.NoteError, match=reason):
+            packet.download_note(make_appointment(1))
 
-        assert note.getvalue() == b''
-        assert [str(m) for m in request._messages] == [
-            'No clinical note PDF found for appointment 1 – skipped.']
-
-    def test_failed_download_warns(self, drchrono, make_request):
-        drchrono.routes['https://files.example.test/note-1.pdf'] = fake_response(status=404)
-        request = make_request()
-
-        note = generate_clinical_notes(request, make_appointment(1))
-
-        assert note.getvalue() == b''
-        assert [str(m) for m in request._messages] == ['Failed to download clinical note for 1']
+    def test_no_note_link(self):
+        with pytest.raises(packet.NoteError, match='no clinical note PDF'):
+            packet.download_note(make_appointment(1, clinical_note={'pdf': None}))
 
 
-# ── GenerateSelectedPDFView ───────────────────────────────────────────────────
+class TestLoad:
+    def test_fetches_everything_in_three_calls(self, drchrono):
+        contents = packet.load('tok', 101, ['2', '1'])
 
-class TestGenerateSelectedPDFView:
+        assert api_calls(drchrono) == [f'{DRCHRONO}/api/patients/101', f'{DRCHRONO}/api/appointments',
+                                       f'{DRCHRONO}/api/line_items']
+        assert drchrono.calls[2]['params'] == {'patient': 101}
+        assert [v['id'] for v in contents['selected']] == ['1', '2']  # oldest first
+        assert sorted(contents['line_items']) == ['1', '2']
+
+    def test_line_items_match_visits_despite_different_id_types(self, drchrono):
+        # DrChrono: appointment id is text ("1"), line item appointment is a number (1). The PDF once
+        # reported "no charges" for every visit because they were compared as-is.
+        contents = packet.load('tok', 101, ['1'])
+
+        assert [i['code'] for i in contents['line_items'][str(contents['selected'][0]['id'])]] == ['99213', '97140']
+
+    def test_visit_not_on_the_patients_list_is_rejected(self, drchrono):
+        with pytest.raises(packet.PacketError, match='visit list changed'):
+            packet.load('tok', 101, ['1', '999'])
+
+    def test_missing_patient_details_block_the_pdf(self, drchrono):
+        drchrono.routes['/api/patients/101'] = fake_response(make_patient(zip_code='', city=None))
+
+        with pytest.raises(packet.PacketError, match="Can't build claim forms: missing patient city, patient zip code."):
+            packet.load('tok', 101, ['1'])
+
+    def test_fetches_a_visit_only_when_icd_codes_are_absent(self, drchrono):
+        visits = two_visits()['appointments']
+        del visits[1]['icd10_codes']
+        drchrono.routes['/api/appointments'] = fake_response({'results': visits, 'next': None})
+        drchrono.routes['/api/appointments/1?verbose=true'] = fake_response(make_appointment(1, icd10_codes=['S13.4']))
+
+        contents = packet.load('tok', 101, ['1', '2'])
+
+        assert contents['selected'][0]['icd10_codes'] == ['S13.4']
+        assert len(api_calls(drchrono)) == 4
+
+
+# ── View ──────────────────────────────────────────────────────────────────────
+
+class TestGenerateView:
     def generate(self, client, selected=('2', '1')):
         return client.post(GENERATE_URL, {'selected_appts': list(selected)})
 
     def test_anonymous_user_redirected_to_login(self, client, db):
-        response = self.generate(client)
-        assert response.url == reverse('verify_app:connect_drchrono')
+        assert self.generate(client).url == reverse('verify_app:connect_drchrono')
 
     def test_get_not_allowed(self, auth_client):
         assert auth_client.get(GENERATE_URL).status_code == 405
 
-    def test_downloads_merged_pdf(self, auth_client, drchrono):
+    def test_downloads_the_pdf_with_three_drchrono_calls(self, auth_client, drchrono):
         response = self.generate(auth_client)
 
         assert response.status_code == 200
         assert response['Content-Type'] == 'application/pdf'
         assert response['Content-Disposition'] == 'attachment; filename="Patient_Jane_Doe_REPORT.pdf"'
+        assert len(api_calls(drchrono)) == 3
+        assert drchrono.calls[0]['headers'] == {'Authorization': 'Bearer valid-access-token'}
 
     def test_page_order_is_balance_then_each_visit_oldest_first(self, auth_client, drchrono):
-        pages = pdf_text(self.generate(auth_client).content)
+        pages = pdf_text(self.generate(auth_client).getvalue())
 
         assert len(pages) == 5
         assert 'Patient Account Balance' in pages[0]
@@ -256,45 +276,76 @@ class TestGenerateSelectedPDFView:
         assert 'NOTE-2' in pages[3]
         assert '98940' in pages[4]
 
-    def test_single_visit(self, auth_client, drchrono):
-        pages = pdf_text(self.generate(auth_client, selected=['2']).content)
-
-        assert len(pages) == 3
-        assert 'NOTE-2' in pages[1]
-
-    def test_missing_patient_data_returns_to_list(self, auth_client, drchrono):
-        drchrono.routes['/api/patients/101'] = fake_response(make_patient(zip_code=''))
-
-        response = self.generate(auth_client)
-
-        assert response.status_code == 302
-        assert response.url == LIST_URL
-        messages = message_texts(response)
-        assert 'PDF generation failed.' in messages
-        assert any('Missing Patient Zip' in m for m in messages)
-
-    def test_drchrono_error_returns_to_list(self, auth_client, drchrono):
-        drchrono.routes['/api/appointments/1?verbose=true'] = fake_response({}, status=500)
-
-        response = self.generate(auth_client)
-
-        assert response.url == LIST_URL
-        assert 'PDF generation failed.' in message_texts(response)
-
-    def test_failed_note_download_is_skipped(self, auth_client, drchrono):
-        # Known bug: generate_clinical_notes returns an empty buffer to skip the note,
-        # but appending an empty buffer makes pypdf raise, so the whole PDF fails.
+    def test_failed_note_download_stops_generation_with_notice(self, auth_client, drchrono):
         drchrono.routes['https://files.example.test/note-1.pdf'] = fake_response(status=404)
 
         response = self.generate(auth_client)
 
-        assert response.status_code == 200
-        assert len(pdf_text(response.content)) == 4
-        assert 'Failed to download clinical note for 1' in message_texts(response)
+        assert response.url == LIST_URL
+        assert message_texts(response) == ["The PDF wasn't generated because these parts couldn't be built:",
+                                           "Mar 10, 2025 clinical note: couldn't download it"]
+
+    def test_visit_without_charges_gets_its_note_but_no_claim_form(self, auth_client, drchrono):
+        data = two_visits()
+        drchrono.routes['/api/line_items?patient=101'] = fake_response(
+            {'results': [i for i in data['line_items'] if i['appointment'] == 1], 'next': None})
+
+        pages = pdf_text(self.generate(auth_client).getvalue())
+
+        assert len(pages) == 4  # balance, note 1, claim 1, note 2
+        assert 'NOTE-2' in pages[3]
+        assert not any('98940' in page for page in pages)
+
+    def test_every_problem_is_listed_at_once(self, auth_client, drchrono):
+        visits = two_visits()['appointments']
+        visits[0]['icd10_codes'] = []
+        visits[1]['clinical_note'] = {'pdf': 'https://files.example.test/note-1.pdf'}  # no signature date
+        drchrono.routes['/api/appointments'] = fake_response({'results': visits, 'next': None})
+        drchrono.routes['https://files.example.test/note-1.pdf'] = fake_response(content=b'<html>')
+
+        response = self.generate(auth_client)
+
+        assert message_texts(response) == [
+            "The PDF wasn't generated because these parts couldn't be built:",
+            "Mar 10, 2025 clinical note: the downloaded file isn't a PDF",
+            'Mar 10, 2025 claim form: the clinical note has no signature date',
+            'May 20, 2025 claim form: no ICD-10 diagnosis codes',
+        ]
+
+    def test_more_than_six_charges_add_a_claim_form(self, auth_client, drchrono):
+        many = [make_line_item(2, str(99200 + n), '10.00', service_date='2025-05-20') for n in range(7)]
+        drchrono.routes['/api/line_items?patient=101'] = fake_response({'results': many, 'next': None})
+
+        pages = pdf_text(self.generate(auth_client, selected=['2']).getvalue())
+
+        assert len(pages) == 4  # balance, note, two claim forms
+
+    def test_missing_patient_details_return_to_list(self, auth_client, drchrono):
+        drchrono.routes['/api/patients/101'] = fake_response(make_patient(zip_code=''))
+
+        response = self.generate(auth_client)
+
+        assert response.url == LIST_URL
+        assert "Can't build claim forms: missing patient zip code." in message_texts(response)
+
+    def test_drchrono_error_returns_to_list_with_plain_message(self, auth_client, drchrono):
+        drchrono.routes['/api/appointments'] = fake_response({}, status=503)
+
+        response = self.generate(auth_client)
+
+        assert response.url == LIST_URL
+        assert "DrChrono returned an error. Try again in a moment." in message_texts(response)
+
+    def test_rejected_token_goes_to_sign_in(self, auth_client, drchrono):
+        drchrono.routes['/api/patients/101'] = fake_response({}, status=401)
+
+        response = self.generate(auth_client)
+
+        assert response.url == reverse('verify_app:connect_drchrono')
+        assert 'Your DrChrono session expired, please sign in again.' in message_texts(response)
 
     def test_no_visits_selected(self, auth_client, drchrono):
         response = self.generate(auth_client, selected=[])
 
-        assert response.status_code == 302
         assert response.url == LIST_URL
         assert 'No appointments were selected for PDF generation.' in message_texts(response)
