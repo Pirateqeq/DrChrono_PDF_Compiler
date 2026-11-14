@@ -16,8 +16,8 @@ DRCHRONO = 'https://app.drchrono.com'
 
 
 def authorize_url(state):
-    params = {'response_type': 'code', 'client_id': settings.DRCHRONO_CLIENT_ID, 'state': state,
-              'redirect_uri': settings.DRCHRONO_REDIRECT_URI, 'scope': settings.DRCHRONO_SCOPES}
+    params = {'response_type': 'code', 'client_id': settings.DRCHRONO_CLIENT_ID,
+              'redirect_uri': settings.DRCHRONO_REDIRECT_URI, 'scope': settings.DRCHRONO_SCOPES, 'state': state}
     return f'{DRCHRONO}/o/authorize/?{urlencode(params)}'
 
 

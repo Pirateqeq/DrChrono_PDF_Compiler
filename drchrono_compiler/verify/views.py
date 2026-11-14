@@ -23,7 +23,8 @@ def connect_drchrono(request):
 
 
 def authorize(request):
-    request.session['oauth_state'] = state = secrets.token_urlsafe(32)
+    state = secrets.token_urlsafe(32)
+    request.session['oauth_state'] = state
     return redirect(services.authorize_url(state))
 
 
