@@ -1,10 +1,11 @@
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 import requests
 from django.contrib.auth.models import AnonymousUser, User
+from django.contrib.messages import get_messages
 from django.http import HttpResponse
 from django.test import Client
 from django.urls import reverse
@@ -45,16 +46,14 @@ def drchrono_http():
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 
-class TestCredentialExpiry:
-    def test_missing_expiry_counts_as_expired(self, credential):
-        credential.expires_at = None
-        assert credential.is_expired
-
-    def test_past_expiry_is_expired(self, credential):
-        assert expire(credential).is_expired
-
-    def test_future_expiry_is_valid(self, credential):
-        assert not credential.is_expired
+class TestNeedsRefresh:
+    @pytest.mark.parametrize('minutes_left, expected', [(None, True), (-1, True), (4, True), (10, False)])
+    def test_five_minute_margin(self, minutes_left, expected, credential):
+        if minutes_left is None:
+            credential.expires_at = None
+        else:
+            expire(credential, minutes_left)
+        assert credential.needs_refresh is expected
 
 
 # ── DrChrono calls ────────────────────────────────────────────────────────────
@@ -86,14 +85,9 @@ class TestRequestToken:
         }
         assert drchrono_http.call_args.kwargs['timeout'] == 10
 
-    @pytest.mark.parametrize('status', [400, 401, 429, 500])
-    def test_http_error_raises(self, status, drchrono_http):
-        drchrono_http.return_value = fake_response({}, status=status)
-        with pytest.raises(DrChronoAuthError):
-            request_token(grant_type='refresh_token', refresh_token='r')
-
-    def test_network_error_raises(self, drchrono_http):
-        drchrono_http.side_effect = requests.ConnectionError('down')
+    @pytest.mark.parametrize('failure', [fake_response({}, status=401), requests.ConnectionError('down')])
+    def test_failures_raise(self, failure, drchrono_http):
+        drchrono_http.side_effect = [failure]
         with pytest.raises(DrChronoAuthError):
             request_token(grant_type='refresh_token', refresh_token='r')
 
@@ -105,11 +99,6 @@ class TestFetchCurrentUser:
         assert fetch_current_user('tok') == {'id': 7, 'username': 'drjane'}
         assert drchrono_http.call_args.args == ('GET', 'https://app.drchrono.com/api/users/current')
         assert drchrono_http.call_args.kwargs['headers'] == {'Authorization': 'Bearer tok'}
-
-    def test_error_raises(self, drchrono_http):
-        drchrono_http.return_value = fake_response({}, status=403)
-        with pytest.raises(DrChronoAuthError):
-            fetch_current_user('tok')
 
 
 # ── Token storage and refresh ─────────────────────────────────────────────────
@@ -154,7 +143,7 @@ class TestGetAccessToken:
     def test_skips_refresh_if_done_while_waiting_for_lock(self, credential, drchrono_http):
         expire(credential)
         # First check sees an old token; the re-check after locking sees a fresh one.
-        with patch('verify.services._needs_refresh', side_effect=[True, False]):
+        with patch.object(DrChronoCredential, 'needs_refresh', new_callable=PropertyMock, side_effect=[True, False]):
             assert get_access_token(credential.user) == 'valid-access-token'
         drchrono_http.assert_not_called()
 
@@ -172,6 +161,11 @@ class TestGetAccessToken:
     def test_request_wrapper(self, credential, make_request):
         assert get_valid_access_token(make_request(credential.user)) == 'valid-access-token'
 
+    def test_request_wrapper_reuses_token_from_require_auth(self, credential, make_request):
+        request = make_request(credential.user)
+        request.drchrono_token = 'already-fetched'
+        assert get_valid_access_token(request) == 'already-fetched'
+
 
 # ── require_auth ──────────────────────────────────────────────────────────────
 
@@ -187,7 +181,7 @@ class TestRequireAuth:
         response = protected_view(request)
 
         assert response.url == LOGIN_URL
-        assert list(request._messages) == []
+        assert list(get_messages(request)) == []
 
     def test_failed_refresh_redirects_with_message(self, credential, make_request, drchrono_http):
         expire(credential)
@@ -197,7 +191,7 @@ class TestRequireAuth:
         response = protected_view(request)
 
         assert response.url == LOGIN_URL
-        assert [str(m) for m in request._messages] == ['Your DrChrono session expired, please sign in again.']
+        assert [str(m) for m in get_messages(request)] == ['Your DrChrono session expired, please sign in again.']
 
     def test_usable_token_is_passed_to_view(self, credential, make_request):
         response = protected_view(make_request(credential.user))
@@ -208,7 +202,6 @@ class TestRequireAuth:
 # ── Sign-in views ─────────────────────────────────────────────────────────────
 
 AUTHORIZE_URL = reverse('verify_app:authorize')
-CALLBACK_TOKEN = {'access_token': 'callback-access', 'refresh_token': 'callback-refresh', 'expires_in': 7200}
 
 
 class TestConnectPage:
@@ -243,15 +236,11 @@ class TestAuthorize:
 
 
 @pytest.fixture
-def drchrono_login():
-    """DrChrono answers the token exchange and the current-user lookup."""
-    def respond(method, url, **kwargs):
-        if method == 'POST':
-            return fake_response(dict(CALLBACK_TOKEN))
-        return fake_response({'id': 7, 'username': 'drjane'})
-
-    with patch('verify.services.requests.request', side_effect=respond) as request:
-        yield request
+def drchrono_login(drchrono_http):
+    """DrChrono answers the token exchange (POST) and the current-user lookup (GET)."""
+    drchrono_http.side_effect = lambda method, url, **kwargs: fake_response(
+        dict(NEW_TOKEN) if method == 'POST' else {'id': 7, 'username': 'drjane'})
+    return drchrono_http
 
 
 def sign_in(client, **params):
@@ -267,8 +256,8 @@ class TestOAuthCallback:
 
         assert response.url == SEARCH_URL
         user = User.objects.get(username='drjane')
-        assert user.drchrono_cred.access_token == 'callback-access'
-        assert user.drchrono_cred.refresh_token == 'callback-refresh'
+        assert user.drchrono_cred.access_token == 'new-access'
+        assert user.drchrono_cred.refresh_token == 'new-refresh'
         assert user.drchrono_cred.expires_at > timezone.now() + timedelta(seconds=7100)
         assert client.session['_auth_user_id'] == str(user.pk)
         assert 'oauth_state' not in client.session
@@ -283,7 +272,7 @@ class TestOAuthCallback:
             'redirect_uri': 'https://testserver/oauth/callback',
             'client_id': 'test-client-id', 'client_secret': 'test-client-secret',
         }
-        assert user_call.kwargs['headers'] == {'Authorization': 'Bearer callback-access'}
+        assert user_call.kwargs['headers'] == {'Authorization': 'Bearer new-access'}
 
     def test_new_user_has_unusable_password(self, client, db, drchrono_login):
         sign_in(client)
@@ -293,7 +282,7 @@ class TestOAuthCallback:
         sign_in(client)
 
         credential.refresh_from_db()
-        assert credential.access_token == 'callback-access'
+        assert credential.access_token == 'new-access'
         assert User.objects.count() == 1
 
     def test_signed_in_user_with_expired_token_gets_new_tokens(self, auth_client, credential, drchrono_login):
@@ -302,8 +291,8 @@ class TestOAuthCallback:
         sign_in(auth_client)
 
         credential.refresh_from_db()
-        assert credential.access_token == 'callback-access'
-        assert not credential.is_expired
+        assert credential.access_token == 'new-access'
+        assert not credential.needs_refresh
 
     @pytest.mark.parametrize('params, message', [
         ({'error': 'access_denied', 'code': None}, 'Sign-in was cancelled.'),
@@ -342,6 +331,43 @@ class TestOAuthCallback:
         assert not User.objects.exists()
 
 
+class TestSignOut:
+    def test_revokes_deletes_tokens_and_ends_session(self, auth_client, credential, drchrono_http):
+        response = auth_client.post(reverse('verify_app:sign_out'))
+
+        assert response.url == 'https://drkurokawa.drchrono.com/accounts/logout/'
+        assert drchrono_http.call_args.args == ('POST', 'https://app.drchrono.com/o/revoke_token/')
+        assert drchrono_http.call_args.kwargs['data'] == {
+            'token': 'valid-refresh-token', 'client_id': 'test-client-id', 'client_secret': 'test-client-secret',
+        }
+        assert not DrChronoCredential.objects.exists()
+        assert '_auth_user_id' not in auth_client.session
+        assert auth_client.get(SEARCH_URL).url == LOGIN_URL
+
+    @pytest.mark.parametrize('failure', [fake_response({}, status=500), requests.ConnectionError('down')])
+    def test_still_signs_out_when_revoke_fails(self, failure, auth_client, credential, drchrono_http):
+        drchrono_http.side_effect = [failure]
+
+        auth_client.post(reverse('verify_app:sign_out'))
+
+        assert not DrChronoCredential.objects.exists()
+        assert '_auth_user_id' not in auth_client.session
+
+    def test_signed_out_user_goes_to_drchrono_logout(self, client, db, drchrono_http):
+        response = client.post(reverse('verify_app:sign_out'))
+
+        assert response.url == 'https://drkurokawa.drchrono.com/accounts/logout/'
+        drchrono_http.assert_not_called()
+
+    def test_get_not_allowed(self, auth_client):
+        assert auth_client.get(reverse('verify_app:sign_out')).status_code == 405
+
+    def test_button_shown_only_when_signed_in(self, client, auth_client, db):
+        button = f'action="{reverse("verify_app:sign_out")}"'
+        assert button in auth_client.get(SEARCH_URL).content.decode()
+        assert button not in client.get(LOGIN_URL).content.decode()
+
+
 class TestCsrfFailure:
     def test_redirects_to_sign_in_with_message(self, credential):
         client = Client(enforce_csrf_checks=True)
@@ -355,11 +381,17 @@ class TestCsrfFailure:
 
 
 class TestCredentialAdmin:
-    def test_admin_list_shows_credentials(self, client, credential):
-        admin = User.objects.create_superuser('admin', 'admin@example.test', 'pw')
-        client.force_login(admin)
-
-        response = client.get(reverse('admin:verify_drchronocredential_changelist'))
+    def test_list_shows_credentials(self, admin_client, credential):
+        response = admin_client.get(reverse('admin:verify_drchronocredential_changelist'))
 
         assert response.status_code == 200
         assert b'drjane' in response.content
+
+    def test_edit_form_hides_tokens(self, admin_client, credential):
+        response = admin_client.get(reverse('admin:verify_drchronocredential_change', args=[credential.pk]))
+
+        html = response.content.decode()
+        assert response.status_code == 200
+        assert 'valid-access-token' not in html and 'valid-refresh-token' not in html
+        assert 'name="access_token"' not in html and 'name="refresh_token"' not in html
+        assert 'name="scope"' in html

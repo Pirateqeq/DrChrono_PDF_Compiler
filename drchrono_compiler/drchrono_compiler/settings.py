@@ -164,7 +164,4 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 DRCHRONO_CLIENT_ID = os.getenv('DRCHRONO_CLIENT_ID')
 DRCHRONO_CLIENT_SECRET = os.getenv('DRCHRONO_CLIENT_SECRET')
 DRCHRONO_REDIRECT_URI = os.getenv('DRCHRONO_REDIRECT_URI')
-DRCHRONO_AUTH_URL = 'https://app.drchrono.com/o/authorize/'
-DRCHRONO_TOKEN_URL = 'https://app.drchrono.com/o/token/'
-DRCHRONO_REVOKE_URL = "https://app.drchrono.com/o/revoke_token/"
 DRCHRONO_SCOPES = os.getenv('DRCHRONO_SCOPES')

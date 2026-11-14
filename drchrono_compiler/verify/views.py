@@ -6,6 +6,7 @@ from django.contrib.auth import login
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from django.shortcuts import redirect, render
+from django.views.decorators.http import require_POST
 
 from . import services
 from .exceptions import DrChronoAuthError
@@ -23,22 +24,23 @@ def connect_drchrono(request):
 
 
 def authorize(request):
-    request.session['oauth_state'] = state = secrets.token_urlsafe(32)
+    state = secrets.token_urlsafe(32)
+    request.session['oauth_state'] = state
     return redirect(services.authorize_url(state))
 
 
 def oauth_callback(request):
     expected_state = request.session.pop('oauth_state', None)
     if 'error' in request.GET:
-        return _back_to_sign_in(request, 'Sign-in was cancelled.')
+        return services.back_to_sign_in(request, 'Sign-in was cancelled.')
     if not expected_state or not secrets.compare_digest(expected_state, request.GET.get('state', '')):
-        return _back_to_sign_in(request, 'Sign-in expired, please try again.')
+        return services.back_to_sign_in(request, 'Sign-in expired, please try again.')
     try:
         token = services.request_token(grant_type='authorization_code', code=request.GET.get('code', ''),
                                        redirect_uri=settings.DRCHRONO_REDIRECT_URI)
         username = services.fetch_current_user(token['access_token'])['username']
     except (DrChronoAuthError, KeyError):
-        return _back_to_sign_in(request, "Couldn't sign in to DrChrono, please try again.")
+        return services.back_to_sign_in(request, "Couldn't sign in to DrChrono, please try again.")
     # DrChrono is the only identity provider, so local users never get a usable password.
     user, _ = User.objects.get_or_create(username=username, defaults={'password': make_password(None)})
     services.save_token(user, token)
@@ -47,10 +49,12 @@ def oauth_callback(request):
     return redirect('search_app:search')
 
 
+@require_POST
+def sign_out(request):
+    """Log out here, then finish on DrChrono's own logout page (it needs a click on its Log out button)."""
+    services.sign_out(request)
+    return redirect(services.DRCHRONO_LOGOUT_URL)
+
+
 def csrf_failure(request, reason=''):
-    return _back_to_sign_in(request, 'Your session has expired, please sign in again.')
-
-
-def _back_to_sign_in(request, message):
-    messages.error(request, message)
-    return redirect('verify_app:connect_drchrono')
+    return services.back_to_sign_in(request, 'Your session has expired, please sign in again.')

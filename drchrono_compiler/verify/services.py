@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 import requests
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import logout
 from django.db import transaction
 from django.shortcuts import redirect
 from django.utils import timezone
@@ -13,11 +14,13 @@ from .exceptions import DrChronoAuthError
 from .models import DrChronoCredential
 
 DRCHRONO = 'https://app.drchrono.com'
+# The practice's own DrChrono address, where staff sign in and out of DrChrono itself.
+DRCHRONO_LOGOUT_URL = 'https://drkurokawa.drchrono.com/accounts/logout/'
 
 
 def authorize_url(state):
-    params = {'response_type': 'code', 'client_id': settings.DRCHRONO_CLIENT_ID, 'state': state,
-              'redirect_uri': settings.DRCHRONO_REDIRECT_URI, 'scope': settings.DRCHRONO_SCOPES}
+    params = {'response_type': 'code', 'client_id': settings.DRCHRONO_CLIENT_ID,
+              'redirect_uri': settings.DRCHRONO_REDIRECT_URI, 'scope': settings.DRCHRONO_SCOPES, 'state': state}
     return f'{DRCHRONO}/o/authorize/?{urlencode(params)}'
 
 
@@ -30,10 +33,14 @@ def _call(method, path, **kwargs):
         raise DrChronoAuthError(f'DrChrono request failed: {e}') from e
 
 
+def _client_post(path, data):
+    client = {'client_id': settings.DRCHRONO_CLIENT_ID, 'client_secret': settings.DRCHRONO_CLIENT_SECRET}
+    return _call('POST', path, data=data | client)
+
+
 def request_token(**data):
     """Code exchange or refresh at /o/token/."""
-    client = {'client_id': settings.DRCHRONO_CLIENT_ID, 'client_secret': settings.DRCHRONO_CLIENT_SECRET}
-    return _call('POST', '/o/token/', data=data | client)
+    return _client_post('/o/token/', data)
 
 
 def fetch_current_user(access_token):
@@ -51,21 +58,16 @@ def save_token(user, token):
     return cred
 
 
-def _needs_refresh(cred):
-    # 5-minute margin so a token can't expire partway through a multi-call PDF build.
-    return cred.expires_at is None or cred.expires_at - timedelta(minutes=5) <= timezone.now()
-
-
 def get_access_token(user):
     cred = DrChronoCredential.objects.filter(user=user).first()
     if cred is None:
         raise DrChronoAuthError('Not connected to DrChrono')
-    if not _needs_refresh(cred):
+    if not cred.needs_refresh:
         return cred.access_token
     with transaction.atomic():
         # Lock so two requests can't both spend the same refresh token.
         cred = DrChronoCredential.objects.select_for_update().get(pk=cred.pk)
-        if not _needs_refresh(cred):  # another request refreshed it while we waited
+        if not cred.needs_refresh:  # another request refreshed it while we waited
             return cred.access_token
         token = request_token(grant_type='refresh_token', refresh_token=cred.refresh_token)
         return save_token(user, token).access_token
@@ -80,11 +82,29 @@ def require_auth(view):
         try:
             request.drchrono_token = get_access_token(request.user)
         except DrChronoAuthError:
-            messages.warning(request, 'Your DrChrono session expired, please sign in again.')
-            return redirect('verify_app:connect_drchrono')
+            return back_to_sign_in(request, 'Your DrChrono session expired, please sign in again.')
         return view(request, *args, **kwargs)
     return wrapper
 
 
+def sign_out(request):
+    """Revoke the app's DrChrono access, delete the stored tokens and end the session."""
+    cred = DrChronoCredential.objects.filter(user=request.user).first() if request.user.is_authenticated else None
+    if cred:
+        try:
+            # Revoking the refresh token also revokes the access token issued with it.
+            _client_post('/o/revoke_token/', {'token': cred.refresh_token or cred.access_token})
+        except DrChronoAuthError:
+            pass  # best effort (an empty-body success also lands here); the tokens are deleted below either way
+        cred.delete()
+    logout(request)
+
+
+def back_to_sign_in(request, message):
+    messages.error(request, message)
+    return redirect('verify_app:connect_drchrono')
+
+
 def get_valid_access_token(request):
-    return get_access_token(request.user)  # kept for search/appts/pdf until they use request.drchrono_token
+    # Kept for search/appts/pdf until they read request.drchrono_token; reuses it to skip a second query.
+    return getattr(request, 'drchrono_token', None) or get_access_token(request.user)

@@ -22,7 +22,7 @@ All code lives in `drchrono_compiler/`. See [`SYSTEM_MAP.md`](SYSTEM_MAP.md) for
 | Path | Purpose |
 |---|---|
 | [`drchrono_compiler/`](drchrono_compiler/drchrono_compiler/DOC.md) | Settings, root URLs, WSGI, shared `templates/layout.html` |
-| [`verify/`](drchrono_compiler/verify/DOC.md) | OAuth2 login, token storage/refresh, `require_auth` decorator |
+| [`verify/`](drchrono_compiler/verify/DOC.md) | Sign-in page and log out, DrChrono OAuth2, token storage/refresh, `require_auth` decorator |
 | [`search/`](drchrono_compiler/search/DOC.md) | Patient search form and results |
 | [`appts/`](drchrono_compiler/appts/DOC.md) | Appointment list with checkboxes |
 | [`pdf/`](drchrono_compiler/pdf/DOC.md) | Balance report, clinical notes, HCFA-1500, final merge |
@@ -48,7 +48,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Set the [environment variables](#environment-variables), with these local values: `DEBUG=True` (also allows `localhost`), `DATABASE_URL=sqlite:///db.sqlite3`, `DRCHRONO_REDIRECT_URI=http://localhost:8000/oauth/callback` (register it in your DrChrono app) and `OAUTHLIB_INSECURE_TRANSPORT=1` for OAuth over plain HTTP.
+Set the [environment variables](#environment-variables), with these local values: `DEBUG=True` (also allows `localhost`), `DATABASE_URL=sqlite:///db.sqlite3`, and `DRCHRONO_REDIRECT_URI=http://localhost:8000/oauth/callback` (register it in your DrChrono app alongside the Render one; if it points at Render, local sign-ins finish on the live site). Open the app at `http://localhost:8000`, not `127.0.0.1`, so the sign-in `state` cookie matches.
 
 ```bash
 python manage.py migrate
@@ -115,6 +115,7 @@ Render terminates TLS; settings force HTTPS, secure cookies, and HSTS when `DEBU
 | Endpoint | Used by |
 |---|---|
 | `POST /o/token/` | Token exchange and refresh (`verify`) |
+| `POST /o/revoke_token/` | Revoke access on log out (`verify`) |
 | `GET /api/users/current` | Identify the user after login (`verify`) |
 | `GET /api/patients_summary` | Patient search (`search`) |
 | `GET /api/appointments` | Appointment history (`core`) |
