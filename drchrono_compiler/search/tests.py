@@ -12,6 +12,8 @@ from search.services import search_patients
 SEARCH_URL = reverse('search_app:search')
 RESULTS_URL = reverse('search_app:results')
 LOGIN_URL = reverse('verify_app:connect_drchrono')
+# make_patient() as the session stores it: only the fields the results page shows.
+JANE = {'id': 101, 'first_name': 'Jane', 'last_name': 'Doe', 'date_of_birth': '1980-04-15', 'chart_id': 'DOJA000001'}
 
 
 # ── Form ──────────────────────────────────────────────────────────────────────
@@ -52,8 +54,8 @@ def api():
 
 
 class TestSearchPatients:
-    def test_sends_only_filled_fields_with_page_size(self, api):
-        search_patients('tok', last_name='Doe', date_of_birth=date(1980, 4, 15))
+    def test_sends_query_with_page_size(self, api):
+        search_patients('tok', {'last_name': 'Doe', 'date_of_birth': '1980-04-15'})
 
         call = api.calls[0]
         assert call['url'] == 'https://app.drchrono.com/api/patients_summary'
@@ -64,22 +66,21 @@ class TestSearchPatients:
         api.routes['/api/patients_summary'] = fake_response(
             {'results': [make_patient(ssn='000-00-0000', address='1 Main St')], 'next': None})
 
-        patients, more = search_patients('tok', last_name='Doe')
+        patients, more = search_patients('tok', {'last_name': 'Doe'})
 
-        assert patients == [{'id': 101, 'first_name': 'Jane', 'last_name': 'Doe',
-                             'date_of_birth': '1980-04-15', 'chart_id': 'DOJA000001'}]
+        assert patients == [JANE]
         assert more is False
 
     def test_more_when_drchrono_has_another_page(self, api):
         api.routes['/api/patients_summary'] = fake_response(
             {'results': [make_patient()], 'next': 'https://app.drchrono.com/api/patients_summary?cursor=2'})
 
-        assert search_patients('tok', last_name='Doe')[1] is True
+        assert search_patients('tok', {'last_name': 'Doe'})[1] is True
 
     def test_errors_propagate(self, api):
         api.routes['/api/patients_summary'] = fake_response({}, status=500)
         with pytest.raises(DrChronoError):
-            search_patients('tok', last_name='Doe')
+            search_patients('tok', {'last_name': 'Doe'})
 
 
 # ── Views ─────────────────────────────────────────────────────────────────────
@@ -99,8 +100,7 @@ class TestSearchView:
 
         assert response.url == RESULTS_URL
         assert auth_client.session['patient_search'] == {
-            'patients': [{'id': 101, 'first_name': 'Jane', 'last_name': 'Doe',
-                          'date_of_birth': '1980-04-15', 'chart_id': 'DOJA000001'}],
+            'patients': [JANE],
             'more': False,
             'query': {'last_name': 'Doe', 'date_of_birth': '1980-04-15'},
         }
@@ -151,12 +151,12 @@ class TestResultsView:
         assert client.get(RESULTS_URL).url == LOGIN_URL
 
     def test_lists_patients(self, auth_client):
-        self.store(auth_client, [{'id': 101, 'first_name': 'Jane', 'last_name': 'Doe',
-                                  'date_of_birth': '1980-04-15', 'chart_id': 'DOJA000001'}])
+        self.store(auth_client, [JANE])
 
         html = auth_client.get(RESULTS_URL).content.decode()
 
         assert 'Doe, Jane' in html and '1980-04-15' in html and 'DOJA000001' in html
+        assert 'href="/appts/patient/101/"' in html
         assert '"Doe"' in html
         assert 'more than 50 matches' not in html
 

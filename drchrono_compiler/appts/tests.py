@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 from django.urls import reverse
 
-from core.drchrono import DrChronoError
+from core.drchrono import DrChronoAuthError, DrChronoError
 from core.testing import make_appointment, make_patient, message_texts
 
 LIST_URL = reverse('appts_app:historical_list', kwargs={'patient_id': 101})
@@ -62,18 +62,9 @@ class TestAppointmentList:
 
     def test_rejected_token_goes_to_sign_in(self, auth_client, drchrono):
         patient, _ = drchrono
-        patient.side_effect = DrChronoError('rejected', 401)
+        patient.side_effect = DrChronoAuthError('rejected')
 
         response = auth_client.get(LIST_URL)
 
         assert response.url == reverse('verify_app:connect_drchrono')
         assert 'Your DrChrono session expired, please sign in again.' in message_texts(response)
-
-    def test_search_results_link_here_by_id(self, auth_client):
-        session = auth_client.session
-        session['patient_search'] = {'patients': [make_patient()], 'more': False, 'query': {}}
-        session.save()
-
-        html = auth_client.get(reverse('search_app:results')).content.decode()
-
-        assert f'href="{LIST_URL}"' in html

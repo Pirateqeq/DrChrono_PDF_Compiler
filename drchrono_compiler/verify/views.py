@@ -9,7 +9,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 from . import services
-from .exceptions import DrChronoAuthError
+from core.drchrono import DrChronoAuthError
 
 
 def connect_drchrono(request):

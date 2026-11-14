@@ -23,7 +23,7 @@ Only what the results page shows: for each patient `id`, `first_name`, `last_nam
 ## Errors
 
 The view catches `DrChronoError`:
-- **401 (token rejected):** re-raised, so `require_auth` sends the user to sign in with "Your DrChrono session expired, please sign in again."
+- **401 (token rejected):** `core.drchrono` raises `DrChronoAuthError` instead, which isn't a `DrChronoError`, so the view can't catch it; `require_auth` sends the user to sign in with "Your DrChrono session expired, please sign in again."
 - **Anything else:** shows [`core.drchrono.user_message`](../core/DOC.md), for example "DrChrono isn't responding. Try again in a moment.", and the form again.
 
 ## forms.py

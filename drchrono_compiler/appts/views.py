@@ -14,8 +14,6 @@ def appointment_list(request, patient_id):
         patient = drchrono.patient(token, patient_id)
         appointments = drchrono.eligible_appointments(token, patient_id)
     except drchrono.DrChronoError as e:
-        if e.status == 401:
-            raise  # require_auth sends the user to sign in
         messages.error(request, drchrono.user_message(e))
     return render(request, 'appts/historical_list.html',
                   {'patient': patient, 'patient_id': patient_id, 'appointments': appointments})

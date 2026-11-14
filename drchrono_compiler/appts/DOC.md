@@ -8,7 +8,7 @@ Part of the [DrChrono PDF Compiler](../../README.md). Shows a patient's eligible
   - [`core.drchrono.patient`](../core/DOC.md), for the heading ("Past Appointments for Jane Doe")
   - [`eligible_appointments`](../core/DOC.md), the visits (every page, newest first)
 
-  On a `DrChronoError`, a 401 is re-raised so `require_auth` sends the user to sign in. Anything else shows `core.drchrono.user_message` and an empty list ("No historical appointments found for this patient.").
+  On a `DrChronoError` it shows `core.drchrono.user_message` and an empty list ("No historical appointments found for this patient."). A rejected token (401) raises `DrChronoAuthError` instead, which `require_auth` turns into the sign-in page.
 
 ## urls.py
 

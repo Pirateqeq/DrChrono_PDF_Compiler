@@ -12,19 +12,17 @@ from .services import search_patients
 def search(request):
     form = PatientSearchForm(request.POST if request.method == 'POST' else None)
     if form.is_valid():
+        # The filled-in fields as strings (dates as YYYY-MM-DD): sent to DrChrono and shown on the results page.
+        query = {field: str(value) for field, value in form.cleaned_data.items() if value}
         try:
-            patients, more = search_patients(request.drchrono_token, **form.cleaned_data)
-        except DrChronoError as e:
-            if e.status == 401:
-                raise  # require_auth sends the user to sign in
-            messages.error(request, user_message(e))
-        else:
+            patients, more = search_patients(request.drchrono_token, query)
             if patients:
-                query = {field: str(value) for field, value in form.cleaned_data.items() if value}
                 request.session['patient_search'] = {'patients': patients, 'more': more, 'query': query}
                 messages.success(request, f'Found {len(patients)} matching patient(s).')
                 return redirect('search_app:results')
             messages.info(request, 'No patients found matching your criteria.')
+        except DrChronoError as e:
+            messages.error(request, user_message(e))
     return render(request, 'search/search.html', {'form': form})
 
 

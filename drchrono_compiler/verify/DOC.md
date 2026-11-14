@@ -50,7 +50,7 @@ DrChrono access tokens last 48 hours. One PDF build makes many API calls, so a t
   3. Otherwise posts the refresh token to `/o/token/` and saves the result.
 
   The lock matters because a refresh token may be single-use: two tabs refreshing at once could otherwise invalidate each other and log the user out.
-- **`require_auth`** wraps every protected view. Signed-out users go to `/`. Otherwise it calls `get_access_token`, puts the token on `request.drchrono_token` (where `search`, `appts` and `pdf` read it for [`core.drchrono`](../core/DOC.md)), and runs the view. It returns to `/` with the "session expired" message if the refresh fails, **or if the view raises `DrChronoError` with status 401** (DrChrono rejected the token mid-session); views re-raise a 401 and report any other status themselves. Other errors pass through. Class-based views use it through `method_decorator(require_auth, name='dispatch')`.
+- **`require_auth`** wraps every protected view. Signed-out users go to `/`. Otherwise it calls `get_access_token`, puts the token on `request.drchrono_token` (where `search`, `appts` and `pdf` read it for [`core.drchrono`](../core/DOC.md)), and runs the view. It returns to `/` with the "session expired" message if the refresh fails, **or if the view raises `DrChronoAuthError`** (`core.drchrono` raises it when DrChrono rejects the token mid-session). Other errors pass through for the view to report. Class-based views use it through `method_decorator(require_auth, name='dispatch')`.
 
 ## DrChrono calls (`services.py`)
 
@@ -73,7 +73,7 @@ Rate limit: DrChrono allows 500 calls per hour per app. A sign-in costs 2 calls 
 
 - **`DrChronoCredential`** (`models.py`) — One per user (`user.drchrono_cred`): `access_token`, `refresh_token`, `expires_at`, `scope`, `created_at`, `updated_at`. `needs_refresh` (missing `expires_at`, or less than 5 minutes left) is the single expiry rule: `get_access_token` uses it and the admin list shows it.
 - **Admin** (`admin.py`) — Lists user, created, expiry and expired status. The edit form excludes both tokens, so live credentials are never displayed or edited there.
-- **`DrChronoAuthError`** (`exceptions.py`) — Raised for every DrChrono sign-in or token failure.
+- **`DrChronoAuthError`** (defined in [`core/drchrono.py`](../core/DOC.md)) — Raised for every sign-in or token failure, here and when a data call gets a 401. `require_auth` turns it into the sign-in page.
 
 ## Local development
 

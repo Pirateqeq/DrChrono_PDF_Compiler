@@ -7,6 +7,13 @@ import requests
 DRCHRONO = 'https://app.drchrono.com'
 
 
+class DrChronoAuthError(Exception):
+    """DrChrono rejected or can't issue a token; the user must sign in again (require_auth handles it).
+
+    Deliberately not a DrChronoError, so a view's `except DrChronoError` can't swallow it.
+    """
+
+
 class DrChronoError(Exception):
     """A DrChrono request failed. `status` is the HTTP status code, or None for network/JSON errors."""
 
@@ -22,11 +29,14 @@ def get(token, path, **params):
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as e:
-        raise DrChronoError(f'DrChrono request failed: {e}', getattr(e.response, 'status_code', None)) from e
+        status = getattr(e.response, 'status_code', None)
+        if status == 401:
+            raise DrChronoAuthError('DrChrono rejected the access token') from e
+        raise DrChronoError(f'DrChrono request failed: {e}', status) from e
 
 
 def user_message(error):
-    """Plain-English text for a DrChronoError. A 401 never gets here: require_auth sends the user to sign in."""
+    """Plain-English text for a DrChronoError, for the page that hit it."""
     return {
         None: "DrChrono isn't responding. Try again in a moment.",
         403: "Your DrChrono account doesn't have permission to see this.",

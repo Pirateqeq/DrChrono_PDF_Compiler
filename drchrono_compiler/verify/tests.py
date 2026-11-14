@@ -12,8 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.testing import fake_response, message_texts
-from core.drchrono import DrChronoError
-from verify.exceptions import DrChronoAuthError
+from core.drchrono import DrChronoAuthError, DrChronoError
 from verify.models import DrChronoCredential
 from verify.services import (
     authorize_url,
@@ -188,7 +187,7 @@ class TestRequireAuth:
     def test_token_rejected_inside_view_redirects_with_message(self, credential, make_request):
         @require_auth
         def view(request):
-            raise DrChronoError('rejected', 401)
+            raise DrChronoAuthError('rejected')
 
         request = make_request(credential.user)
         response = view(request)
