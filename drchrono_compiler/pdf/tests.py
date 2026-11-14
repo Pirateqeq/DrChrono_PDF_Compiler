@@ -23,8 +23,7 @@ from pdf.golden import (
     GOLDEN_VISIT,
     record_drawing,
 )
-from pdf import balance, hcfa
-from pdf.services import generate_clinical_notes
+from pdf import balance, hcfa, packet
 
 GENERATE_URL = reverse('pdf_app:generate_selected', kwargs={'patient_id': 101})
 LIST_URL = reverse('appts_app:historical_list', kwargs={'patient_id': 101})
@@ -36,37 +35,36 @@ def pdf_text(data):
 
 
 def two_visits():
-    """Visit 1 (older, two charges, one already paid) and visit 2 (newer, one charge)."""
+    """Visit 1 (older: one unpaid charge, one paid) and visit 2 (newer: one charge)."""
     return {
         'patient': make_patient(),
         'appointments': [make_appointment(2, '2025-05-20T10:00:00'), make_appointment(1, '2025-03-10T09:30:00')],
-        'line_items': {
-            1: [make_line_item(1, '99213', '150.00'),
-                make_line_item(1, '97140', '40.00', balance_total='0.00')],
-            2: [make_line_item(2, '98940', '75.50', service_date='2025-05-20')],
-        },
+        'line_items': [make_line_item(1, '99213', '150.00'), make_line_item(1, '97140', '40.00', balance_total='0.00'),
+                       make_line_item(2, '98940', '75.50', service_date='2025-05-20')],
     }
 
 
 def drchrono_routes(data):
     routes = {
         '/api/patients/101': fake_response(data['patient']),
-        '/api/appointments': fake_response({'results': data['appointments']}),
+        '/api/appointments': fake_response({'results': data['appointments'], 'next': None}),
+        '/api/line_items?patient=101': fake_response({'results': data['line_items'], 'next': None}),
     }
     for appt in data['appointments']:
-        appt_id = appt['id']
-        routes[f'/api/appointments/{appt_id}?verbose=true'] = fake_response(appt)
-        routes[f'/api/line_items?appointment={appt_id}'] = fake_response({'results': data['line_items'][appt_id]})
-        routes[appt['clinical_note']['pdf']] = fake_response(content=make_pdf_bytes(f'NOTE-{appt_id}'))
+        routes[appt['clinical_note']['pdf']] = fake_response(content=make_pdf_bytes(f"NOTE-{appt['id']}"))
     return routes
 
 
 @pytest.fixture
 def drchrono():
-    """Fake DrChrono for everything under pdf/. Edit `.routes` to change a response."""
+    """Fake DrChrono (API and note files) on the shared session. Edit `.routes` to change a response."""
     fake = FakeDrChrono(drchrono_routes(two_visits()))
-    with patch('core.drchrono.requests.get', fake.get), patch('pdf.services.requests', fake):
+    with patch('core.drchrono.session.get', fake.get):
         yield fake
+
+
+def api_calls(fake):
+    return [c['url'] for c in fake.calls if c['url'].startswith('https://app.drchrono.com/')]
 
 
 # ── Golden output: the overhaul must reproduce today's documents ──────────────
@@ -191,51 +189,80 @@ class TestBalanceReport:
         assert 'No billable transactions found.' in self.report_text(items=items)
 
 
-# ── generate_clinical_notes ───────────────────────────────────────────────────
+# ── packet ────────────────────────────────────────────────────────────────────
 
-class TestGenerateClinicalNotes:
-    def test_downloads_note(self, drchrono, make_request):
-        note = generate_clinical_notes(make_request(), make_appointment(1))
-        assert 'NOTE-1' in pdf_text(note)[0]
+class TestDownloadNote:
+    def test_downloads_the_pdf(self, drchrono):
+        assert 'NOTE-1' in pdf_text(packet.download_note(make_appointment(1)))[0]
 
-    def test_missing_note_link_warns(self, drchrono, make_request):
-        request = make_request()
+    @pytest.mark.parametrize('setup, reason', [
+        (lambda routes: None, 'no clinical note PDF'),
+        (lambda routes: routes.update({'https://files.example.test/note-1.pdf': fake_response(status=404)}),
+         "couldn't download it"),
+        (lambda routes: routes.update({'https://files.example.test/note-1.pdf': fake_response(content=b'<html>')}),
+         "isn't a PDF"),
+    ])
+    def test_problems_raise_note_error(self, setup, reason, drchrono):
+        setup(drchrono.routes)
+        visit = make_appointment(1, clinical_note={'pdf': None}) if reason == 'no clinical note PDF' else make_appointment(1)
 
-        note = generate_clinical_notes(request, make_appointment(1, clinical_note={'pdf': None}))
-
-        assert note.getvalue() == b''
-        assert [str(m) for m in request._messages] == [
-            'No clinical note PDF found for appointment 1 – skipped.']
-
-    def test_failed_download_warns(self, drchrono, make_request):
-        drchrono.routes['https://files.example.test/note-1.pdf'] = fake_response(status=404)
-        request = make_request()
-
-        note = generate_clinical_notes(request, make_appointment(1))
-
-        assert note.getvalue() == b''
-        assert [str(m) for m in request._messages] == ['Failed to download clinical note for 1']
+        with pytest.raises(packet.NoteError, match=reason):
+            packet.download_note(visit)
 
 
-# ── GenerateSelectedPDFView ───────────────────────────────────────────────────
+class TestLoad:
+    def test_fetches_everything_in_three_calls(self, drchrono):
+        contents = packet.load('tok', 101, ['2', '1'])
 
-class TestGenerateSelectedPDFView:
+        assert api_calls(drchrono) == ['https://app.drchrono.com/api/patients/101',
+                                       'https://app.drchrono.com/api/appointments',
+                                       'https://app.drchrono.com/api/line_items']
+        assert drchrono.calls[2]['params'] == {'patient': 101}
+        assert [v['id'] for v in contents['selected']] == [1, 2]  # oldest first
+        assert sorted(contents['line_items']) == [1, 2]
+
+    def test_visit_not_on_the_patients_list_is_rejected(self, drchrono):
+        with pytest.raises(packet.PacketError, match='visit list changed'):
+            packet.load('tok', 101, ['1', '999'])
+
+    def test_missing_patient_details_block_the_pdf(self, drchrono):
+        drchrono.routes['/api/patients/101'] = fake_response(make_patient(zip_code='', city=None))
+
+        with pytest.raises(packet.PacketError, match="Can't build claim forms: missing patient city, patient zip code."):
+            packet.load('tok', 101, ['1'])
+
+    def test_fetches_a_visit_only_when_icd_codes_are_absent(self, drchrono):
+        visits = two_visits()['appointments']
+        del visits[1]['icd10_codes']
+        drchrono.routes['/api/appointments'] = fake_response({'results': visits, 'next': None})
+        drchrono.routes['/api/appointments/1?verbose=true'] = fake_response(make_appointment(1, icd10_codes=['S13.4']))
+
+        contents = packet.load('tok', 101, ['1', '2'])
+
+        assert contents['selected'][0]['icd10_codes'] == ['S13.4']
+        assert len(api_calls(drchrono)) == 4
+
+
+# ── View ──────────────────────────────────────────────────────────────────────
+
+class TestGenerateView:
     def generate(self, client, selected=('2', '1')):
         return client.post(GENERATE_URL, {'selected_appts': list(selected)})
 
     def test_anonymous_user_redirected_to_login(self, client, db):
-        response = self.generate(client)
-        assert response.url == reverse('verify_app:connect_drchrono')
+        assert self.generate(client).url == reverse('verify_app:connect_drchrono')
 
     def test_get_not_allowed(self, auth_client):
         assert auth_client.get(GENERATE_URL).status_code == 405
 
-    def test_downloads_merged_pdf(self, auth_client, drchrono):
+    def test_downloads_the_pdf_with_three_drchrono_calls(self, auth_client, drchrono):
         response = self.generate(auth_client)
 
         assert response.status_code == 200
         assert response['Content-Type'] == 'application/pdf'
         assert response['Content-Disposition'] == 'attachment; filename="Patient_Jane_Doe_REPORT.pdf"'
+        assert len(api_calls(drchrono)) == 3
+        assert drchrono.calls[0]['headers'] == {'Authorization': 'Bearer valid-access-token'}
 
     def test_page_order_is_balance_then_each_visit_oldest_first(self, auth_client, drchrono):
         pages = pdf_text(self.generate(auth_client).content)
@@ -247,45 +274,59 @@ class TestGenerateSelectedPDFView:
         assert 'NOTE-2' in pages[3]
         assert '98940' in pages[4]
 
-    def test_single_visit(self, auth_client, drchrono):
+    def test_failed_note_download_is_skipped_and_listed(self, auth_client, drchrono):
+        # Was a known bug: an empty note buffer broke the merge and the whole PDF failed.
+        drchrono.routes['https://files.example.test/note-1.pdf'] = fake_response(status=404)
+
+        pages = pdf_text(self.generate(auth_client).content)
+
+        assert 'Not included' in pages[0] and "Mar 10, 2025 clinical note: couldn't download it" in pages[0]
+        assert 'Patient Account Balance' in pages[1]
+        assert len(pages) == 5  # not included, balance, visit 1 claim, visit 2 note and claim
+
+    def test_visit_without_charges_lists_its_claim(self, auth_client, drchrono):
+        data = two_visits()
+        drchrono.routes['/api/line_items?patient=101'] = fake_response(
+            {'results': [i for i in data['line_items'] if i['appointment'] == 1], 'next': None})
+
+        pages = pdf_text(self.generate(auth_client).content)
+
+        assert 'May 20, 2025 claim form: no charges' in pages[0]
+
+    def test_more_than_six_charges_add_a_claim_form(self, auth_client, drchrono):
+        many = [make_line_item(2, str(99200 + n), '10.00', service_date='2025-05-20') for n in range(7)]
+        drchrono.routes['/api/line_items?patient=101'] = fake_response({'results': many, 'next': None})
+
         pages = pdf_text(self.generate(auth_client, selected=['2']).content)
 
-        assert len(pages) == 3
-        assert 'NOTE-2' in pages[1]
+        assert len(pages) == 4  # balance, note, two claim forms
 
-    def test_missing_patient_data_returns_to_list(self, auth_client, drchrono):
+    def test_missing_patient_details_return_to_list(self, auth_client, drchrono):
         drchrono.routes['/api/patients/101'] = fake_response(make_patient(zip_code=''))
 
         response = self.generate(auth_client)
 
-        assert response.status_code == 302
         assert response.url == LIST_URL
-        messages = message_texts(response)
-        assert 'PDF generation failed.' in messages
-        assert any('Missing Patient Zip' in m for m in messages)
+        assert "Can't build claim forms: missing patient zip code." in message_texts(response)
 
-    def test_drchrono_error_returns_to_list(self, auth_client, drchrono):
-        drchrono.routes['/api/appointments/1?verbose=true'] = fake_response({}, status=500)
+    def test_drchrono_error_returns_to_list_with_plain_message(self, auth_client, drchrono):
+        drchrono.routes['/api/appointments'] = fake_response({}, status=503)
 
         response = self.generate(auth_client)
 
         assert response.url == LIST_URL
-        assert 'PDF generation failed.' in message_texts(response)
+        assert "DrChrono returned an error. Try again in a moment." in message_texts(response)
 
-    def test_failed_note_download_is_skipped(self, auth_client, drchrono):
-        # Known bug: generate_clinical_notes returns an empty buffer to skip the note,
-        # but appending an empty buffer makes pypdf raise, so the whole PDF fails.
-        drchrono.routes['https://files.example.test/note-1.pdf'] = fake_response(status=404)
+    def test_rejected_token_goes_to_sign_in(self, auth_client, drchrono):
+        drchrono.routes['/api/patients/101'] = fake_response({}, status=401)
 
         response = self.generate(auth_client)
 
-        assert response.status_code == 200
-        assert len(pdf_text(response.content)) == 4
-        assert 'Failed to download clinical note for 1' in message_texts(response)
+        assert response.url == reverse('verify_app:connect_drchrono')
+        assert 'Your DrChrono session expired, please sign in again.' in message_texts(response)
 
     def test_no_visits_selected(self, auth_client, drchrono):
         response = self.generate(auth_client, selected=[])
 
-        assert response.status_code == 302
         assert response.url == LIST_URL
         assert 'No appointments were selected for PDF generation.' in message_texts(response)

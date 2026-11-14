@@ -29,8 +29,8 @@ def fake_response(json_data=None, status=200, content=b''):
 
 class FakeDrChrono:
     """
-    Stands in for `requests.get` (patch `core.drchrono.requests.get` with `.get`)
-    or for a whole `requests` module (e.g. `pdf.services.requests`, for note downloads).
+    Stands in for `requests.get`: patch `core.drchrono.session.get` with its `.get`, which covers
+    DrChrono API calls and clinical-note downloads (both use the shared session).
     Routes are keyed by URL with the DrChrono host stripped. A key with a query
     ('/api/line_items?appointment=1') matches that path with exactly those params;
     a bare path ('/api/appointments') matches any params. Full URLs work for other

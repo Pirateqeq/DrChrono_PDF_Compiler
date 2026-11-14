@@ -1,83 +1,33 @@
-from django.views import View
-from django.http import HttpResponse
 from django.contrib import messages
+from django.http import HttpResponse
 from django.shortcuts import redirect
+from django.views.decorators.http import require_POST
+
+from core.drchrono import DrChronoError, user_message
 from verify.services import require_auth
-from django.utils.decorators import method_decorator
-from pypdf import PdfWriter
 
-from core import drchrono
+from . import packet
 
-from .services import (
-    generate_balance_report,
-    generate_clinical_notes,
-    fetch_hcfa_data,
-    generate_hcfa_bill,
-)
-from io import BytesIO
 
-@method_decorator(require_auth, name='dispatch')
-class GenerateSelectedPDFView(View):
-
-    # Verify DrChrono login access
-    login_url = 'verify_app:connect_drchrono'
-    def dispatch(self, request, *args, **kwargs):
-        return super().dispatch(request, *args, **kwargs)
-    
-    def post(self, request, patient_id):
-        PRINT_ERRORS = False
-        selected_ids = request.POST.getlist('selected_appts')
-        if not selected_ids:
-            messages.warning(request, "No appointments were selected for PDF generation.")
-            return redirect('appts_app:historical_list', patient_id=patient_id)
-
-        try:
-            selected_ids = list(reversed(selected_ids))
-            token = request.drchrono_token
-
-            merger = PdfWriter()
-
-            balance_buffer = generate_balance_report(patient_id, token)
-            merger.append(balance_buffer)
-
-            # Pull appointment JSONs and key them into -> selected_appts{ APPT_ID : APPT_JSON }. Note - Later seperate pull into service file to include exception checks.
-            # If appointment JSON is pulled properly key line_item into -> line_items{ APPT_ID : LINE_ITEM_JSON}. Note - Later seperate pull into service file to include exception checks.
-            line_items = {}
-            selected_appts = {}
-            for appt_id in selected_ids:
-                selected_appts[appt_id] = drchrono.appointment(token, appt_id)
-                line_items[appt_id] = drchrono.line_items(token, appointment=appt_id)
-
-            # Pull patient JSON. Note - Later seperate pull into service file to include exception checks.
-            patient_json = {}
-            patient_json = drchrono.patient(token, patient_id)
-        
-
-            # Pull doctor JSON. Note - Later seperate pull into service file to include exception checks (Implement Later).
-            for appt_id in selected_appts:
-                if PRINT_ERRORS: print("Printing Clinical Notes")
-                merger.append(generate_clinical_notes(request, selected_appts[appt_id]))
-                
-                if PRINT_ERRORS: print("Fetching Patient Data")
-                hcfa_data = fetch_hcfa_data(patient_json, selected_appts[appt_id], line_items[appt_id])
-
-                if PRINT_ERRORS: print("Printing HCFA Bill")
-                merger.append(generate_hcfa_bill(request, hcfa_data))
-
-            output = BytesIO()
-            merger.write(output)
-            merger.close()
-            output.seek(0)
-
-            response = HttpResponse(content_type='application/pdf')
-            filename = f"Patient_{patient_json.get('first_name')}_{patient_json.get('last_name')}_REPORT.pdf"
-            response['Content-Disposition'] = f'attachment; filename="{filename}"'
-            response.write(output.read())
-
-            return response
-
-        except Exception as e:
-            messages.error(request, f"PDF generation failed.")
-            for er in e.args:
-                messages.error(request, str(er))
-            return redirect('appts_app:historical_list', patient_id=patient_id)
+@require_POST
+@require_auth
+def generate(request, patient_id):
+    """Build the billing PDF for the ticked visits and send it as a download."""
+    selected_ids = request.POST.getlist('selected_appts')
+    if not selected_ids:
+        messages.warning(request, 'No appointments were selected for PDF generation.')
+        return redirect('appts_app:historical_list', patient_id=patient_id)
+    try:
+        contents = packet.load(request.drchrono_token, patient_id, selected_ids)
+        pdf = packet.build(contents)
+    except packet.PacketError as e:
+        messages.error(request, str(e))
+    except DrChronoError as e:
+        messages.error(request, user_message(e))
+    else:
+        patient = contents['patient']
+        response = HttpResponse(pdf, content_type='application/pdf')
+        response['Content-Disposition'] = (
+            f'attachment; filename="Patient_{patient["first_name"]}_{patient["last_name"]}_REPORT.pdf"')
+        return response
+    return redirect('appts_app:historical_list', patient_id=patient_id)

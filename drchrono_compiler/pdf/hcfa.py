@@ -77,7 +77,8 @@ def claim_forms(patient, visit, charges):
         raise ClaimError('no charges')
     if not visit.get('icd10_codes'):
         raise ClaimError('no ICD-10 diagnosis codes')
-    if not (visit.get('clinical_note') or {}).get('updated_at'):
+    note = visit.get('clinical_note')
+    if not isinstance(note, dict) or not note.get('updated_at'):
         raise ClaimError('the clinical note has no signature date')
     fields = _visit_fields(patient, visit)
     return [_draw(fields, patient.get('gender'), visit['icd10_codes'], charges[i:i + LINES_PER_FORM])

@@ -39,12 +39,6 @@ def provider_env(monkeypatch):
         monkeypatch.setenv(key, value)
 
 
-@pytest.fixture(autouse=True)
-def run_from_project_dir(monkeypatch):
-    """The app loads pdf/static/HCFA.pdf by relative path, as in production."""
-    monkeypatch.chdir(settings.BASE_DIR)
-
-
 @pytest.fixture
 def user(db):
     user = User.objects.create(username='drjane')

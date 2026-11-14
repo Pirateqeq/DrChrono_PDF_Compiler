@@ -15,9 +15,9 @@ def days_ago(n):
 
 @pytest.fixture
 def api():
-    """FakeDrChrono standing in for requests.get; add routes per test."""
+    """FakeDrChrono standing in for the shared session's get; add routes per test."""
     fake = FakeDrChrono({})
-    with patch('core.drchrono.requests.get', fake.get):
+    with patch('core.drchrono.session.get', fake.get):
         yield fake
 
 
@@ -68,7 +68,7 @@ class TestGet:
         assert exc.value.status == status
 
     def test_network_error_has_no_status(self):
-        with patch('core.drchrono.requests.get', side_effect=requests.ConnectionError('down')):
+        with patch('core.drchrono.session.get', side_effect=requests.ConnectionError('down')):
             with pytest.raises(DrChronoError) as exc:
                 drchrono.get('tok', '/api/patients/101')
         assert exc.value.status is None
