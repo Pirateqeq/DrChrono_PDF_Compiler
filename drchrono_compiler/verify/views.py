@@ -51,9 +51,10 @@ def oauth_callback(request):
 
 @require_POST
 def sign_out(request):
-    """Log out here, then finish on DrChrono's own logout page (it needs a click on its Log out button)."""
+    """Log out of this app only; the user's DrChrono session is left alone."""
     services.sign_out(request)
-    return redirect(services.DRCHRONO_LOGOUT_URL)
+    messages.success(request, "You're signed out.")
+    return redirect('verify_app:connect_drchrono')
 
 
 def csrf_failure(request, reason=''):

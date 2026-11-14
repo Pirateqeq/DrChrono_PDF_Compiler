@@ -29,16 +29,15 @@ Every failure goes through `services.back_to_sign_in`, which sets an error messa
 
 ## Log out
 
-The navbar (`templates/layout.html`) shows a **Log out** button while signed in. It POSTs to **`/logout/` (`sign_out`)**, which:
+The navbar (`templates/layout.html`) shows a **Log out** button while signed in. It POSTs to **`/logout/` (`sign_out`)**, which signs the user out of this app only:
 
 1. Revokes the app's DrChrono access at `/o/revoke_token/` with the refresh token (revoking it also revokes the access token issued with it). This is best effort: if DrChrono is unreachable or replies with an error, logging out still continues.
 2. Deletes the stored `DrChronoCredential`.
-3. Ends the Django session.
-4. Redirects to the practice's DrChrono logout page (`DRCHRONO_LOGOUT_URL`, `https://drkurokawa.drchrono.com/accounts/logout/`).
+3. Ends the Django session and returns to the sign-in page with "You're signed out."
 
-Step 4 exists because staff already sign out through DrChrono, and because signing out of this app alone would leave DrChrono signed in: anyone at the same browser could click "Sign in with DrChrono" and get straight back in. The app can't sign anyone out of DrChrono itself; DrChrono's logout page only completes when the user clicks its own Log out button (a CSRF-protected form), so the user finishes there with one click.
+The user's DrChrono session is left alone. If they're still signed in to DrChrono in that browser, "Sign in with DrChrono" gets them back in without a password; to fully sign out on a shared computer, they also sign out of DrChrono. Signing out of DrChrono, likewise, never ends this app's session (Django's session lasts up to 2 weeks).
 
-The view only accepts POST, so another site can't log people out with a link or image. Signing out of DrChrono separately never ends this app's session (Django's session lasts up to 2 weeks).
+The view only accepts POST, so another site can't log people out with a link or image.
 
 ## Tokens and refresh
 

@@ -335,7 +335,8 @@ class TestSignOut:
     def test_revokes_deletes_tokens_and_ends_session(self, auth_client, credential, drchrono_http):
         response = auth_client.post(reverse('verify_app:sign_out'))
 
-        assert response.url == 'https://drkurokawa.drchrono.com/accounts/logout/'
+        assert response.url == LOGIN_URL
+        assert "You're signed out." in message_texts(response)
         assert drchrono_http.call_args.args == ('POST', 'https://app.drchrono.com/o/revoke_token/')
         assert drchrono_http.call_args.kwargs['data'] == {
             'token': 'valid-refresh-token', 'client_id': 'test-client-id', 'client_secret': 'test-client-secret',
@@ -353,11 +354,17 @@ class TestSignOut:
         assert not DrChronoCredential.objects.exists()
         assert '_auth_user_id' not in auth_client.session
 
-    def test_signed_out_user_goes_to_drchrono_logout(self, client, db, drchrono_http):
+    def test_already_signed_out_user(self, client, db, drchrono_http):
         response = client.post(reverse('verify_app:sign_out'))
 
-        assert response.url == 'https://drkurokawa.drchrono.com/accounts/logout/'
+        assert response.url == LOGIN_URL
         drchrono_http.assert_not_called()
+
+    def test_sign_in_page_shows_signed_out_message(self, auth_client, credential, drchrono_http):
+        response = auth_client.post(reverse('verify_app:sign_out'), follow=True)
+
+        assert b"You&#x27;re signed out." in response.content
+        assert b'Sign in with DrChrono' in response.content
 
     def test_get_not_allowed(self, auth_client):
         assert auth_client.get(reverse('verify_app:sign_out')).status_code == 405
