@@ -1,76 +1,90 @@
-import requests
 from datetime import timedelta
-from django.conf import settings
-from django.utils import timezone
-from .models import DrChronoCredential
-from .exceptions import DrChronoAuthError
-
-def refresh_token(cred: DrChronoCredential) -> DrChronoCredential:
-    """
-    Attempt to refresh token using stored refresh token.
-    Returns updated credential object on success; raises exception on failure.
-    """
-    if not cred.refresh_token:
-        raise DrChronoAuthError("No refresh token available - full re-auth required")
-
-    payload = {
-        'grant_type': 'refresh_token',
-        'refresh_token': cred.refresh_token,
-        'client_id': settings.DRCHRONO_CLIENT_ID,
-        'client_secret': settings.DRCHRONO_CLIENT_SECRET,
-    }
-
-    try:
-        resp = requests.post(settings.DRCHRONO_TOKEN_URL, data=payload, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-
-        #Update user credential
-        cred.access_token = data['access_token']
-        cred.refresh_token = data.get('refresh_token', cred.refresh_token)
-        cred.expires_at = timezone.now() + timedelta(seconds=data['expires_in'])
-        cred.scope = data.get('scope', cred.scope)
-        cred.save()
-
-        return cred
-    except requests.HTTPError as e:
-        if e.response.status_code in (400, 401):
-            # Refresh needed
-            raise DrChronoAuthError('scope', cred.scope)
-        raise DrChronoAuthError(f"Refresh failed: {e}")
-    except requests.RequestException as e:
-        raise DrChronoAuthError(f"Network error during refresh: {e}")
-
-def get_valid_access_token(request) -> str:
-    """
-    Returns valid bearer token or raises auth error
-    Intended for other apps/views
-    """
-    
-    try:
-        cred = request.user.drchrono_cred
-        if not cred.is_expired:
-            return cred.access_token
-        refreshed_cred = refresh_token(cred)
-        return refreshed_cred.access_token
-    except DrChronoCredential.DoesNotExist:
-        raise DrChronoAuthError("No DrChrono credentials found for this user")
-
-# Decorator for views that need API acess
 from functools import wraps
+from urllib.parse import urlencode
+
+import requests
+from django.conf import settings
+from django.contrib import messages
+from django.db import transaction
 from django.shortcuts import redirect
-def require_auth(view_func):
-    @wraps(view_func)
+from django.utils import timezone
+
+from .exceptions import DrChronoAuthError
+from .models import DrChronoCredential
+
+DRCHRONO = 'https://app.drchrono.com'
+
+
+def authorize_url(state):
+    params = {'response_type': 'code', 'client_id': settings.DRCHRONO_CLIENT_ID, 'state': state,
+              'redirect_uri': settings.DRCHRONO_REDIRECT_URI, 'scope': settings.DRCHRONO_SCOPES}
+    return f'{DRCHRONO}/o/authorize/?{urlencode(params)}'
+
+
+def _call(method, path, **kwargs):
+    try:
+        resp = requests.request(method, DRCHRONO + path, timeout=10, **kwargs)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as e:
+        raise DrChronoAuthError(f'DrChrono request failed: {e}') from e
+
+
+def request_token(**data):
+    """Code exchange or refresh at /o/token/."""
+    client = {'client_id': settings.DRCHRONO_CLIENT_ID, 'client_secret': settings.DRCHRONO_CLIENT_SECRET}
+    return _call('POST', '/o/token/', data=data | client)
+
+
+def fetch_current_user(access_token):
+    return _call('GET', '/api/users/current', headers={'Authorization': f'Bearer {access_token}'})
+
+
+def save_token(user, token):
+    """The only place tokens are written. Keeps the old refresh token if DrChrono sends none."""
+    cred = DrChronoCredential.objects.filter(user=user).first() or DrChronoCredential(user=user)
+    cred.access_token = token['access_token']
+    cred.refresh_token = token.get('refresh_token') or cred.refresh_token
+    cred.expires_at = timezone.now() + timedelta(seconds=token['expires_in'])
+    cred.scope = token.get('scope', cred.scope)
+    cred.save()
+    return cred
+
+
+def _needs_refresh(cred):
+    # 5-minute margin so a token can't expire partway through a multi-call PDF build.
+    return cred.expires_at is None or cred.expires_at - timedelta(minutes=5) <= timezone.now()
+
+
+def get_access_token(user):
+    cred = DrChronoCredential.objects.filter(user=user).first()
+    if cred is None:
+        raise DrChronoAuthError('Not connected to DrChrono')
+    if not _needs_refresh(cred):
+        return cred.access_token
+    with transaction.atomic():
+        # Lock so two requests can't both spend the same refresh token.
+        cred = DrChronoCredential.objects.select_for_update().get(pk=cred.pk)
+        if not _needs_refresh(cred):  # another request refreshed it while we waited
+            return cred.access_token
+        token = request_token(grant_type='refresh_token', refresh_token=cred.refresh_token)
+        return save_token(user, token).access_token
+
+
+def require_auth(view):
+    """Run the view with request.drchrono_token set, or send the user to sign in."""
+    @wraps(view)
     def wrapper(request, *args, **kwargs):
         if not request.user.is_authenticated:
             return redirect('verify_app:connect_drchrono')
-    
         try:
-            token = get_valid_access_token(request)
-            request.drchrono_token = token
-        except DrChronoAuthError as e:
-            # Restart Oauth flow
+            request.drchrono_token = get_access_token(request.user)
+        except DrChronoAuthError:
+            messages.warning(request, 'Your DrChrono session expired, please sign in again.')
             return redirect('verify_app:connect_drchrono')
-        
-        return view_func(request, *args, **kwargs)
+        return view(request, *args, **kwargs)
     return wrapper
+
+
+def get_valid_access_token(request):
+    return get_access_token(request.user)  # kept for search/appts/pdf until they use request.drchrono_token
