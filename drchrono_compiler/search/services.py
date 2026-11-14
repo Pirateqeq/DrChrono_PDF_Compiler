@@ -1,10 +1,8 @@
-from verify.services import get_valid_access_token
-from verify.exceptions import DrChronoAuthError
-import requests
 from django.contrib.auth.decorators import login_required
-from verify.services import require_auth
 
-DRCHRONO_BASE = "https://app.drchrono.com/api"
+from core import drchrono
+from verify.exceptions import DrChronoAuthError
+from verify.services import require_auth
 
 @login_required(login_url='verify:connect_drchrono')
 @require_auth
@@ -14,12 +12,6 @@ def search_patients(request, search_filters: dict) -> tuple[list[dict], str | No
     Filter ex: {'first_name': 'John', 'last_name': 'Smith', 'page_size': 20}
     """
 
-    try:
-        token = get_valid_access_token(request)
-    except DrChronoAuthError as e:
-        raise
-    
-    headers = {"Authorization": f"Bearer {token}"}
     allowed = ["first_name", "last_name", "date_of_birth", "chart_id"]
     params = {
         "page_size": min(search_filters.get("page_size", 50), 200),
@@ -35,19 +27,12 @@ def search_patients(request, search_filters: dict) -> tuple[list[dict], str | No
             except:
                 pass
 
-    url = f"{DRCHRONO_BASE}/patients_summary"
-
     try:
-        resp = requests.get(url, headers=headers, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-
-        patients = data.get("results", [])
-        next_cursor = data.get("next")
-        return patients, next_cursor
-    
-    except requests.HTTPError as e:
-        status = e.response.status_code
+        data = drchrono.get(request.drchrono_token, '/api/patients_summary', **params)
+    except drchrono.DrChronoError as e:
+        status = e.status
+        if status is None:
+            raise  # network or unreadable reply: the view shows its generic error, as before
         if status == 401:
             raise DrChronoAuthError("Authentication error during patient search")
         elif status == 403:
@@ -58,3 +43,4 @@ def search_patients(request, search_filters: dict) -> tuple[list[dict], str | No
             raise RuntimeError(f"server error")
         else:
             raise RuntimeError(f"unknown")
+    return data.get("results", []), data.get("next")

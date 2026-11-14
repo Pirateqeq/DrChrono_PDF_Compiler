@@ -10,10 +10,11 @@ from django.db import transaction
 from django.shortcuts import redirect
 from django.utils import timezone
 
+from core.drchrono import DRCHRONO
+
 from .exceptions import DrChronoAuthError
 from .models import DrChronoCredential
 
-DRCHRONO = 'https://app.drchrono.com'
 
 
 def authorize_url(state):
@@ -101,8 +102,3 @@ def sign_out(request):
 def back_to_sign_in(request, message):
     messages.error(request, message)
     return redirect('verify_app:connect_drchrono')
-
-
-def get_valid_access_token(request):
-    # Kept for search/appts/pdf until they read request.drchrono_token; reuses it to skip a second query.
-    return getattr(request, 'drchrono_token', None) or get_access_token(request.user)

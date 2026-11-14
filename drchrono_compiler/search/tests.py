@@ -46,7 +46,7 @@ class TestPatientSearchForm:
 
 @pytest.fixture
 def api_get():
-    with patch('search.services.requests.get') as get:
+    with patch('core.drchrono.requests.get') as get:
         get.return_value = fake_response({'results': [make_patient()], 'next': 'cursor-2'})
         yield get
 

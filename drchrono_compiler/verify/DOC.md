@@ -50,8 +50,7 @@ DrChrono access tokens last 48 hours. One PDF build makes many API calls, so a t
   3. Otherwise posts the refresh token to `/o/token/` and saves the result.
 
   The lock matters because a refresh token may be single-use: two tabs refreshing at once could otherwise invalidate each other and log the user out.
-- **`require_auth`** wraps every protected view. Signed-out users go to `/`. Otherwise it calls `get_access_token`, puts the token on `request.drchrono_token`, and runs the view, or returns to `/` with the "session expired" message if the refresh fails. Class-based views use it through `method_decorator(require_auth, name='dispatch')`.
-- **`get_valid_access_token(request)`** is kept so `search`, `appts` and `pdf` keep working. It returns `request.drchrono_token` when `require_auth` already set it, so those apps don't add a second database query; they can switch to reading the attribute directly.
+- **`require_auth`** wraps every protected view. Signed-out users go to `/`. Otherwise it calls `get_access_token`, puts the token on `request.drchrono_token` (where `search`, `appts` and `pdf` read it for [`core.drchrono`](../core/DOC.md)), and runs the view, or returns to `/` with the "session expired" message if the refresh fails. Class-based views use it through `method_decorator(require_auth, name='dispatch')`.
 
 ## DrChrono calls (`services.py`)
 

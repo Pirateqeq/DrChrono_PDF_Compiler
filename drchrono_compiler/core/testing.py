@@ -1,13 +1,15 @@
 """Fake DrChrono data and HTTP responses shared by every app's tests."""
 
 from io import BytesIO
+from urllib.parse import urlencode
 from unittest.mock import Mock
 
 import requests
 from django.contrib.messages import get_messages
 from reportlab.pdfgen import canvas
 
-DRCHRONO_HOST = 'https://app.drchrono.com'
+from core.drchrono import DRCHRONO
+
 
 
 def fake_response(json_data=None, status=200, content=b''):
@@ -27,10 +29,12 @@ def fake_response(json_data=None, status=200, content=b''):
 
 class FakeDrChrono:
     """
-    Replaces the `requests` module for code that calls `requests.get(url, ...)`.
-    Routes are keyed by URL with the DrChrono host stripped, e.g.
-    '/api/patients/101' or '/api/line_items?appointment=1'. Full URLs work for
-    other hosts (clinical note files). Unknown URLs fail the test.
+    Stands in for `requests.get` (patch `core.drchrono.requests.get` with `.get`)
+    or for a whole `requests` module (e.g. `pdf.services.requests`, for note downloads).
+    Routes are keyed by URL with the DrChrono host stripped. A key with a query
+    ('/api/line_items?appointment=1') matches that path with exactly those params;
+    a bare path ('/api/appointments') matches any params. Full URLs work for other
+    hosts (clinical note files). Unknown URLs fail the test.
     """
 
     def __init__(self, routes):
@@ -39,10 +43,12 @@ class FakeDrChrono:
 
     def get(self, url, headers=None, params=None, timeout=None):
         self.calls.append({'url': url, 'headers': headers, 'params': params, 'timeout': timeout})
-        key = url.removeprefix(DRCHRONO_HOST)
-        if key not in self.routes:
-            raise AssertionError(f'Unexpected DrChrono request: {url}')
-        return self.routes[key]
+        path = url.removeprefix(DRCHRONO)
+        query = urlencode(params or {})
+        for key in (f'{path}?{query}', path):  # `path?` never matches a route, so no-param calls fall through
+            if key in self.routes:
+                return self.routes[key]
+        raise AssertionError(f'Unexpected DrChrono request: {url} {params or ""}')
 
 
 def make_patient(**overrides):

@@ -9,7 +9,7 @@ How the [DrChrono PDF Compiler](README.md) fits together: what the user does, wh
 | 1 | `/`, `/authorize/` (`verify`) | Opens the site, clicks **Sign in with DrChrono** | Shows the sign-in page (or goes to search if already signed in); saves a random `state` and redirects | DrChrono sign-in |
 | 2 | `/oauth/callback` (`verify`) | Signs in to DrChrono, allows access | Checks `state`, exchanges code for tokens, saves them to a passwordless local user | "Successfully connected as …", search page |
 | 3 | `/search/` (`search`) | Enters first name, last name and/or DOB, clicks **Search Patients** | Calls `/api/patients_summary`, stores results in session | "Found N matching patient(s)." |
-| 4 | `/search/results/` (`search`) | Clicks **Select & View Appointments** | Loads last 3 years of past, attended visits with a clinical note PDF | Patient cards (name, DOB, chart ID) |
+| 4 | `/search/results/` (`search`) | Clicks **Select & View Appointments** | Loads every past, attended visit scheduled in the last 3 years with a clinical note PDF | Patient cards (name, DOB, chart ID) |
 | 5 | `/appts/patient/<id>_<name>/historical/` (`appts`) | Unticks unwanted visits, clicks **Generate PDF Report for Selected** | — | Visits newest first, all ticked |
 | 6 | `POST /pdf/patient/<id>/generate-selected/` (`pdf`) | Waits | Fetches data, draws forms, merges | Download `Patient_<First>_<Last>_REPORT.pdf`, or back to step 5 with errors |
 | 7 | `POST /logout/` (`verify`) | Clicks **Log out** in the navbar | Revokes the app's DrChrono access, deletes stored tokens, ends the session (DrChrono itself stays signed in) | Sign-in page: "You're signed out." |
@@ -25,7 +25,7 @@ flowchart LR
         S[search<br/>patient search]
         A[appts<br/>visit list]
         P[pdf<br/>build + merge PDF]
-        C[core<br/>DrChrono fetch helpers]
+        C[core<br/>DrChrono API client]
     end
 
     subgraph DC["DrChrono"]
@@ -46,7 +46,7 @@ flowchart LR
     V --> O
     V --> API
     V --> DB
-    S --> API
+    S --> C
     S --> DB
     A --> C
     P --> C
@@ -69,7 +69,7 @@ sequenceDiagram
     PDF->>DC: Refresh token if under 5 minutes left
     Note over PDF,DC: Balance report (all eligible visits, last 3 years)
     PDF->>DC: GET /api/patients/{id}
-    PDF->>DC: GET /api/appointments
+    PDF->>DC: GET /api/appointments (every page)
     PDF->>DC: GET /api/line_items (each visit)
     Note over PDF,DC: Ticked visits
     PDF->>DC: GET /api/appointments/{id}, /api/line_items (each)

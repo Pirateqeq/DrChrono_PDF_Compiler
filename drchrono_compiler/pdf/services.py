@@ -14,11 +14,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from core.services import (
-    fetch_patient,
-    fetch_lineitem,
-    get_valid_appointments,
-)
+from core import drchrono
 
 def generate_balance_report(patient_id: int, token: str, provider_name: str = None) -> BytesIO:
     """
@@ -26,17 +22,16 @@ def generate_balance_report(patient_id: int, token: str, provider_name: str = No
     """
     provider_name = provider_name or getenv('PROVIDER_NAME', 'Unknown Provider')
 
-    headers = {"Authorization": f"Bearer {token}"}
     buffer = BytesIO()
 
     # ── Fetch patient
     patient_json = {}
-    patient_json = fetch_patient(requests, headers, patient_id)
+    patient_json = drchrono.patient(token, patient_id)
 
     patient_name = f"{patient_json.get('last_name')}, {patient_json.get('first_name')}".strip() or "Unknown Patient"
 
     # ── Fetch appointments
-    valid_appts = get_valid_appointments(requests, headers, patient_id)
+    valid_appts = drchrono.eligible_appointments(token, patient_id)
 
     # ── Fetch line items ──────────────────────────────────────────────────────────
     transactions = []
@@ -44,7 +39,7 @@ def generate_balance_report(patient_id: int, token: str, provider_name: str = No
         appt_id = appt.get("id")
 
         items = {}
-        items = fetch_lineitem(requests, headers, appt_id)
+        items = drchrono.line_items(token, appointment=appt_id)
 
         for item in items:
             if(item.get('balance_total') == '0.00'):

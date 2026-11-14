@@ -8,8 +8,8 @@ Patient lookup by name and/or date of birth. Results are kept in the session, no
 
 ## services.py
 
-- **`search_patients(request, search_filters)`** — `GET /api/patients_summary` with `first_name`, `last_name`, `date_of_birth`, `chart_id` (others ignored). `page_size` defaults to 50, max 200. Returns `(patients, next_cursor)`.
-  - 401/403 → `DrChronoAuthError`; other HTTP errors → `RuntimeError("client error" | "server error")`.
+- **`search_patients(request, search_filters)`** — `GET /api/patients_summary` through [`core.drchrono.get`](../core/DOC.md) with `request.drchrono_token`, sending `first_name`, `last_name`, `date_of_birth`, `chart_id` (others ignored). `page_size` defaults to 50, max 200. Returns `(patients, next_cursor)`.
+  - Maps `DrChronoError.status`: 401/403 → `DrChronoAuthError`; other 4xx/5xx → `RuntimeError("client error" | "server error")`; no status (network or unreadable reply) is re-raised, so the view shows its generic error.
   - Wrapped in `login_required` and [`require_auth`](../verify/DOC.md) even though it's a helper, not a routed view.
 
 ## views.py

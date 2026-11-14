@@ -4,7 +4,7 @@ Shows a patient's eligible past appointments so the user can pick which ones go 
 
 ## views.py
 
-- **`HistoricalAppointmentsView`** (`ListView`, protected by [`require_auth`](../verify/DOC.md)) — Gets the list from [`core.get_valid_appointments`](../core/DOC.md). Any exception shows an error message and an empty list.
+- **`HistoricalAppointmentsView`** (`ListView`, protected by [`require_auth`](../verify/DOC.md)) — Gets the list from [`core.drchrono.eligible_appointments`](../core/DOC.md) with `request.drchrono_token`. Any exception shows an error message and an empty list.
 
 ## urls.py
 

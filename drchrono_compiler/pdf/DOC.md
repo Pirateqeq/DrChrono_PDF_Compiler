@@ -12,7 +12,7 @@ Builds the final merged PDF. Part of the [DrChrono PDF Compiler](../../README.md
 
 ## services.py
 
-- **`generate_balance_report(patient_id, token, provider_name=None)`** — ReportLab table of every non-zero line item across all of the patient's [valid appointments](../core/DOC.md) (not just the selected ones), newest first, with the total balance. Header uses `PROVIDER_NAME`.
+- **`generate_balance_report(patient_id, token, provider_name=None)`** — ReportLab table of every non-zero line item across all of the patient's [eligible appointments](../core/DOC.md) (not just the selected ones), newest first, with the total balance. Header uses `PROVIDER_NAME`.
 - **`generate_clinical_notes(request, appt)`** — Downloads the appointment's clinical note PDF. On a missing URL or failed download, adds a warning and returns an empty buffer.
 - **`fetch_hcfa_data(patient_json, appt_json, line_item_json)`** — Builds the HCFA data dict from patient demographics, the appointment's ICD-10 codes, line items (date, CPT code, price), and provider env vars. Raises an `Exception` listing every missing field.
 - **`generate_hcfa_bill(request, data)`** — Draws text and checkmarks at fixed coordinates on a ReportLab canvas and overlays it on `static/HCFA.pdf`.
