@@ -58,9 +58,10 @@ def eligible_appointments(token, patient_id):
         scheduled = appt.get('scheduled_time') or appt.get('date')
         note = appt.get('clinical_note')
         pdf_url = note.get('pdf') if isinstance(note, dict) else note
-        if (appt.get('status') in ('Rescheduled', 'Cancelled', 'No Show') or not scheduled
-                or scheduled[:10] > today.isoformat() or not str(pdf_url).startswith('http')):
-            continue
-        # A copy, so DrChrono's data isn't changed; the list template formats the parsed datetime.
-        eligible.append({**appt, 'scheduled_time': datetime.fromisoformat(scheduled)})
+        attended = appt.get('status') not in ('Rescheduled', 'Cancelled', 'No Show')
+        in_past = bool(scheduled) and scheduled[:10] <= today.isoformat()
+        has_note = str(pdf_url).startswith('http')
+        if attended and in_past and has_note:
+            # A copy, so DrChrono's data isn't changed; the list template formats the parsed datetime.
+            eligible.append({**appt, 'scheduled_time': datetime.fromisoformat(scheduled)})
     return sorted(eligible, key=lambda a: a['scheduled_time'], reverse=True)
