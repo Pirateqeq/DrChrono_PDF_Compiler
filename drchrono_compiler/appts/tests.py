@@ -15,7 +15,7 @@ def appointments():
         make_appointment(2, datetime(2025, 3, 10, 9, 30), reason='Low back pain'),
         make_appointment(1, datetime(2024, 11, 2, 14, 0), reason=None),
     ]
-    with patch('appts.views.get_valid_appointments', return_value=visits) as fake:
+    with patch('appts.views.eligible_appointments', return_value=visits) as fake:
         yield fake
 
 
@@ -39,8 +39,7 @@ class TestHistoricalAppointmentsView:
         assert 'No reason provided' in html
         assert html.count('name="selected_appts"') == 2
         assert 'value="2" checked' in html and 'value="1" checked' in html
-        assert appointments.call_args.args[1] == {'Authorization': 'Bearer valid-access-token'}
-        assert appointments.call_args.args[2] == 101
+        assert appointments.call_args.args == ('valid-access-token', 101)
 
     def test_form_posts_to_pdf_generation(self, auth_client, appointments):
         html = auth_client.get(LIST_URL).content.decode()
@@ -50,7 +49,7 @@ class TestHistoricalAppointmentsView:
         assert '<input type="hidden" name="patient_name" value="Jane Doe">' in html
 
     def test_fetch_error_shows_message_and_empty_list(self, auth_client):
-        with patch('appts.views.get_valid_appointments', side_effect=RuntimeError('timeout')):
+        with patch('appts.views.eligible_appointments', side_effect=RuntimeError('timeout')):
             response = auth_client.get(LIST_URL)
 
         assert response.status_code == 200

@@ -62,7 +62,7 @@ def drchrono_routes(data):
 def drchrono():
     """Fake DrChrono for everything under pdf/. Edit `.routes` to change a response."""
     fake = FakeDrChrono(drchrono_routes(two_visits()))
-    with patch('pdf.services.requests', fake), patch('pdf.views.requests', fake):
+    with patch('core.drchrono.requests.get', fake.get), patch('pdf.services.requests', fake):
         yield fake
 
 

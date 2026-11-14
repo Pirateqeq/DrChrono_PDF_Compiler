@@ -1,14 +1,9 @@
-from datetime import datetime, timedelta
 from django.views.generic import ListView
 from django.contrib import messages
-from verify.services import require_auth, get_valid_access_token
-from verify.exceptions import DrChronoAuthError
 from django.utils.decorators import method_decorator
-import requests
 
-from core.services import(
-     get_valid_appointments,
-)
+from core.drchrono import eligible_appointments
+from verify.services import require_auth
 
 @method_decorator(require_auth, name='dispatch')
 class HistoricalAppointmentsView(ListView):
@@ -24,10 +19,7 @@ class HistoricalAppointmentsView(ListView):
         patient_id = self.kwargs['patient_id']
 
         try:
-            token = get_valid_access_token(self.request)
-            headers = {"Authorization": f"Bearer {token}"}
-
-            return get_valid_appointments(requests, headers, patient_id)
+            return eligible_appointments(self.request.drchrono_token, patient_id)
 
         except Exception as e:
             messages.error(self.request, f"Failed to load appointments: {str(e)}")

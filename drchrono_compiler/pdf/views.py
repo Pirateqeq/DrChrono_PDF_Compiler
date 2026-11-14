@@ -2,15 +2,11 @@ from django.views import View
 from django.http import HttpResponse
 from django.contrib import messages
 from django.shortcuts import redirect
-from verify.services import require_auth, get_valid_access_token
+from verify.services import require_auth
 from django.utils.decorators import method_decorator
 from pypdf import PdfWriter
 
-from core.services import (
-    fetch_appointment,
-    fetch_lineitem,
-    fetch_patient,
-)
+from core import drchrono
 
 from .services import (
     generate_balance_report,
@@ -19,7 +15,6 @@ from .services import (
     generate_hcfa_bill,
 )
 from io import BytesIO
-import requests
 
 @method_decorator(require_auth, name='dispatch')
 class GenerateSelectedPDFView(View):
@@ -38,8 +33,7 @@ class GenerateSelectedPDFView(View):
 
         try:
             selected_ids = list(reversed(selected_ids))
-            token = get_valid_access_token(request)
-            headers = {"Authorization": f"Bearer {token}"}
+            token = request.drchrono_token
 
             merger = PdfWriter()
 
@@ -51,12 +45,12 @@ class GenerateSelectedPDFView(View):
             line_items = {}
             selected_appts = {}
             for appt_id in selected_ids:
-                selected_appts[appt_id] = fetch_appointment(requests, headers, appt_id)
-                line_items[appt_id] = fetch_lineitem(requests, headers, appt_id)
+                selected_appts[appt_id] = drchrono.appointment(token, appt_id)
+                line_items[appt_id] = drchrono.line_items(token, appointment=appt_id)
 
             # Pull patient JSON. Note - Later seperate pull into service file to include exception checks.
             patient_json = {}
-            patient_json = fetch_patient(requests, headers, patient_id)
+            patient_json = drchrono.patient(token, patient_id)
         
 
             # Pull doctor JSON. Note - Later seperate pull into service file to include exception checks (Implement Later).
