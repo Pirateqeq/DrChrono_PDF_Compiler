@@ -24,14 +24,14 @@ No linter or formatter is configured. CI (`.github/workflows/tests.yml`) runs `p
 ## Local environment
 
 - `settings.py` calls `load_dotenv(BASE_DIR / '.env')`, so `drchrono_compiler/.env` (git-ignored) supplies local config. **Real environment variables override `.env`**: a stray `DATABASE_URL` or `DEBUG` in the shell or a VS Code-injected env file silently wins.
-- Local needs `DEBUG=True` (otherwise HTTPS redirect, and `localhost` is only added to `ALLOWED_HOSTS` when `DEBUG` is on), `DATABASE_URL=sqlite:///db.sqlite3`, `DRCHRONO_REDIRECT_URI=http://localhost:8000/oauth/callback`, `OAUTHLIB_INSECURE_TRANSPORT=1`.
+- Local needs `DEBUG=True` (otherwise HTTPS redirect, and `localhost` is only added to `ALLOWED_HOSTS` when `DEBUG` is on), `DATABASE_URL=sqlite:///db.sqlite3`, `DRCHRONO_REDIRECT_URI=http://localhost:8000/oauth/callback` (if it's the Render URL, DrChrono sends local sign-ins to the live site). Use `http://localhost:8000`, not `127.0.0.1`: the OAuth `state` lives in a host-specific session cookie.
 - Never point local runs at the production `DATABASE_URL`, and never commit `.env`, generated PDFs, or real patient data.
 
 ## Architecture
 
 Apps under `drchrono_compiler/`, all mounted in `drchrono_compiler/urls.py` with namespaces `verify_app` (at `/`), `search_app`, `appts_app`, `pdf_app`. `core` has no routes.
 
-**Auth (`verify`)** — `/` starts OAuth; `oauth_callback` creates a passwordless Django `User` keyed by DrChrono username and stores tokens in `DrChronoCredential` (one-to-one). Every protected view is wrapped by `verify.services.require_auth` (via `method_decorator(..., name='dispatch')` on CBVs), which refreshes an expired token or redirects to `/`, and sets `request.drchrono_token`. Downstream code currently ignores that attribute and calls `get_valid_access_token(request)` again. `CSRF_FAILURE_VIEW` also redirects to login.
+**Auth (`verify`)** — OAuth2 authorization-code flow with plain `requests` (no OAuth library; DrChrono URLs live in `verify/services.py`). `/` is a sign-in page, `/authorize/` saves a random `state` in the session and redirects to DrChrono, `/oauth/callback` checks `state`, exchanges the code, and creates a passwordless Django `User` keyed by DrChrono username. `save_token` is the only place tokens are written to `DrChronoCredential` (one-to-one). Every protected view is wrapped by `verify.services.require_auth` (via `method_decorator(..., name='dispatch')` on CBVs), which calls `get_access_token` (refreshes when under 5 minutes are left, under `select_for_update`) and sets `request.drchrono_token`, or redirects to `/` with a message. Downstream code still calls `get_valid_access_token(request)` again instead of reading that attribute. Every sign-in failure and `CSRF_FAILURE_VIEW` return to `/` with a message.
 
 **DrChrono access (`core/services.py`)** — fetch helpers take the `requests` module and auth `headers` as arguments instead of importing them. Callers pass their own module-level `requests`, which is why tests patch e.g. `pdf.services.requests` and `pdf.views.requests`, not `core.services`. `get_valid_appointments` is the single definition of an "eligible" appointment (past, not cancelled/rescheduled/no-show, has a clinical note PDF, first page of 50 only) and is shared by the appointment list and the balance report.
 
@@ -44,7 +44,8 @@ Apps under `drchrono_compiler/`, all mounted in `drchrono_compiler/urls.py` with
 - pytest + pytest-django; `pytest.ini` selects `drchrono_compiler/settings_test.py` (in-memory SQLite, dummy DrChrono settings, HTTPS redirect off).
 - `conftest.py` autouse fixtures: block all real HTTP (`requests.Session.request` raises), set fake `PROVIDER_*` env vars, `chdir` to the project dir. Shared fixtures: `credential`, `auth_client` (signed-in client with a valid token), `make_request` (request with session + messages).
 - `core/testing.py` has fake records (`make_patient`, `make_appointment`, `make_line_item`, `make_pdf_bytes`), `fake_response`, `message_texts`, and `FakeDrChrono`, which replaces the `requests` module and routes `get()` by URL with the `https://app.drchrono.com` prefix stripped (e.g. `'/api/line_items?appointment=1'`); unknown URLs fail the test.
-- Six tests fail on purpose, one per known bug, each marked with a `# Known bug:` comment: OAuth callback dropping tokens for a signed-in user, unusable password never saved, `scheduled_time` KeyError on the `date` fallback, non-10-digit phone on the HCFA form, empty note buffer breaking the merge, and the `appts:` namespace typo when no visits are selected. Fix the code, not the assertions.
+- Four tests fail on purpose, one per known bug, each marked with a `# Known bug:` comment: `scheduled_time` KeyError on the `date` fallback, non-10-digit phone on the HCFA form, empty note buffer breaking the merge, and the `appts:` namespace typo when no visits are selected. Fix the code, not the assertions.
+- `verify` tests patch `verify.services.requests.request` (every DrChrono call in `verify` goes through it).
 - When moving code between modules, update `patch(...)` targets; a failure there doesn't mean behavior changed.
 
 ## Gotchas
