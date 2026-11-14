@@ -35,7 +35,7 @@ flowchart LR
     end
 
     DB[(PostgreSQL<br/>users, tokens, sessions)]
-    CFG[Config<br/>PROVIDER_* env vars<br/>pdf/static/HCFA.pdf]
+    CFG[Config<br/>PROVIDER_* env vars<br/>pdf/forms/HCFA.pdf]
 
     U -- sign in --> V
     U -- search --> S
@@ -67,19 +67,18 @@ sequenceDiagram
 
     User->>PDF: POST ticked appointment IDs
     PDF->>DC: Refresh token if under 5 minutes left
-    Note over PDF,DC: Balance report (all eligible visits, last 3 years)
+    Note over PDF,DC: Fetch once (one reused connection)
     PDF->>DC: GET /api/patients/{id}
     PDF->>DC: GET /api/appointments (every page)
-    PDF->>DC: GET /api/line_items (each visit)
-    Note over PDF,DC: Ticked visits
-    PDF->>DC: GET /api/appointments/{id}, /api/line_items (each)
-    PDF->>DC: GET /api/patients/{id}
+    PDF->>DC: GET /api/line_items?patient={id}
+    PDF->>PDF: Check ticked visits belong to the patient, and claim details are complete
+    PDF->>PDF: Balance report (all eligible visits)
     loop Each ticked visit, oldest first
         PDF->>DC: Download clinical note PDF
-        PDF->>PDF: Build HCFA data (fail if required field missing)
-        PDF->>PDF: Draw HCFA-1500 over template
+        PDF->>PDF: Claim form(s), 6 charges per form
+        PDF->>PDF: Skip and list anything that fails
     end
-    PDF->>PDF: Merge all pages
+    PDF->>PDF: Merge ('Not included' page first if anything was skipped)
     PDF-->>User: PDF download (Patient_First_Last_REPORT.pdf)
 ```
 
@@ -87,14 +86,15 @@ sequenceDiagram
 
 ```
 Patient_<First>_<Last>_REPORT.pdf
+├── Not included          only if something was skipped: what, and why
 ├── Balance report        provider, patient, total balance, unpaid line items
-├── Visit A
+├── Visit A (oldest)
 │   ├── Clinical note     DrChrono's PDF, as is
-│   └── HCFA-1500         one page
+│   └── HCFA-1500         one page per 6 charges
 ├── Visit B
 │   ├── Clinical note
 │   └── HCFA-1500
-└── … one pair per ticked visit
+└── … per ticked visit, oldest first
 ```
 
 HCFA-1500 box sources:
@@ -134,4 +134,5 @@ HCFA-1500 box sources:
 | DrChrono rejects the token mid-session (401) | Sign-in page: "Your DrChrono session expired, please sign in again." |
 | More than 50 search matches | "DrChrono found more than 50 matches. Add details to narrow the search." |
 | Visits can't load | "Failed to load appointments: …", empty list |
-| Patient data missing for HCFA | "PDF generation failed." plus missing fields, back on visit list |
+| Patient or practice details every claim needs are missing | Back on the visit list: "Can't build claim forms: missing patient zip code." |
+| One visit's note or claim can't be built | PDF still downloads; a first "Not included" page lists what was skipped and why |

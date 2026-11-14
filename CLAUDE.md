@@ -6,7 +6,7 @@ Django 5.2 internal tool for one medical practice: signs in to DrChrono (EHR) vi
 
 ## Commands
 
-Run everything from `drchrono_compiler/` (where `manage.py` and `pytest.ini` live). `pdf/static/HCFA.pdf` is opened by relative path, so other working directories break PDF generation.
+Run everything from `drchrono_compiler/` (where `manage.py` and `pytest.ini` live).
 
 ```bash
 pip install -r requirements-dev.txt                       # app + pytest tooling
@@ -37,20 +37,20 @@ Apps under `drchrono_compiler/`, all mounted in `drchrono_compiler/urls.py` with
 
 **Flow** — `search` (two function views) stores one slim session entry, `patient_search` (`patients` with only id/names/DOB/chart ID, a `more` flag, the `query`), between the form POST and `/search/results/`. The appointment list is `/appts/patient/<id>/`: only the ID is in the URL, and the name is fetched from DrChrono. `pdf` redirects back there by ID. Views catch `DrChronoError` and show `core.drchrono.user_message(e)`. A 401 raises `DrChronoAuthError` instead (defined in `core.drchrono`, deliberately not a `DrChronoError`), which `require_auth` turns into the sign-in page. Sessions last 12 hours (`SESSION_COOKIE_AGE`).
 
-**PDF (`pdf`)** — `GenerateSelectedPDFView.post` merges with pypdf: balance report (all eligible visits, not just selected), then for each selected appointment, oldest first, the downloaded clinical note and an HCFA form. Any exception redirects back to the appointment list with the messages. `fetch_hcfa_data` builds the form dict and raises `Exception(list_of_missing_fields)`. `generate_hcfa_bill` draws text at hand-tuned coordinates on a ReportLab canvas (620×800) and overlays it on `pdf/static/HCFA.pdf`; coordinates only match that template. Practice identity (`PROVIDER_*`, `FEDERAL_TAX_ID`, `PHYSICIAN_SIGNATURE`) is read with `os.getenv` at call time, not from Django settings.
+**PDF (`pdf`)** — `views.generate` → `packet.load` (fetch once: patient, every eligible visit, all line items by patient: about 3 DrChrono calls; rejects visit IDs that aren't this patient's; `PacketError` if details every claim needs are missing) → `packet.build`: balance report (`balance.py`, pure, all eligible visits), then per ticked visit oldest first the downloaded note and claim form(s) (`hcfa.py`, 6 charges per form). A note or claim that fails is skipped and listed on a first "Not included" page; no `except Exception`. `hcfa.py` keeps the hand-tuned coordinates as data (`CHECKS`, `TEXT`, `LINE_X`) for `pdf/forms/HCFA.pdf` (absolute path); `pdf/golden.py` pins the exact drawing and balance text. Practice identity (`PROVIDER_*`, `FEDERAL_TAX_ID`, `PHYSICIAN_SIGNATURE`) is read with `os.getenv` at call time. DrChrono calls and note downloads share `core.drchrono.session` (one connection pool per worker).
 
 ## Tests
 
 - pytest + pytest-django; `pytest.ini` selects `drchrono_compiler/settings_test.py` (in-memory SQLite, dummy DrChrono settings, HTTPS redirect off).
-- `conftest.py` autouse fixtures: block all real HTTP (`requests.Session.request` raises), set fake `PROVIDER_*` env vars, `chdir` to the project dir. Shared fixtures: `credential`, `auth_client` (signed-in client with a valid token), `make_request` (request with session + messages).
-- `core/testing.py` has fake records (`make_patient`, `make_appointment`, `make_line_item`, `make_pdf_bytes`), `fake_response`, `message_texts`, and `FakeDrChrono`. Patch `core.drchrono.requests.get` with `FakeDrChrono(...).get`; routes are keyed by URL without the host, `'/api/line_items?appointment=1'` matches that path with those exact params, a bare path matches any params, unknown URLs fail the test. `pdf` tests also replace `pdf.services.requests` with it for clinical-note downloads.
-- Two tests fail on purpose, one per known bug, each marked with a `# Known bug:` comment (both in `pdf`): non-10-digit phone on the HCFA form, and the empty note buffer breaking the merge. Fix the code, not the assertions.
+- `conftest.py` autouse fixtures: block all real HTTP (`requests.Session.request` raises), set fake `PROVIDER_*` env vars. Shared fixtures: `credential`, `auth_client` (signed-in client with a valid token), `make_request` (request with session + messages).
+- `core/testing.py` has fake records (`make_patient`, `make_appointment`, `make_line_item`, `make_pdf_bytes`), `fake_response`, `message_texts`, and `FakeDrChrono`. Patch `core.drchrono.session.get` with `FakeDrChrono(...).get` (covers DrChrono calls and note downloads); routes are keyed by URL without the host, `'/api/line_items?patient=101'` matches that path with those exact params, a bare path matches any params, full URLs work for note files, unknown URLs fail the test.
+- There are no known-bug tests left: the suite should be fully green. `pdf/golden.py` must keep passing unless a layout change is intended.
 - `verify` tests patch `verify.services.requests.request` (every DrChrono call in `verify` goes through it).
 - When moving code between modules, update `patch(...)` targets; a failure there doesn't mean behavior changed.
 
 ## Gotchas
 
 - `requirements.txt` is UTF-16 LE with CRLF line endings. Edit it with code that preserves that encoding; `requirements-dev.txt` is plain UTF-8 and includes it with `-r`.
-- `generate_hcfa_bill` merges onto a page not attached to a writer; pypdf warns this breaks in pypdf 7. Don't upgrade past 6.x without fixing it.
+- Claim-form coordinates in `pdf/hcfa.py` only match `pdf/forms/HCFA.pdf`; replacing the template means re-deriving them and regenerating `pdf/golden.py`.
 - `STATICFILES_STORAGE` in settings is ignored by Django 5.2 (use `STORAGES` if static storage matters).
 - Keep `README.md`, `SYSTEM_MAP.md` and the app `DOC.md` files in sync with behavior changes; the owner wants docs short and to the point.
