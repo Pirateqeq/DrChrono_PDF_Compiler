@@ -25,6 +25,20 @@ def page(results, next_url=None):
     return fake_response({'previous': None, 'results': results, 'next': next_url})
 
 
+# ── user_message ──────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize('status, text', [
+    (None, "isn't responding"),
+    (403, "doesn't have permission"),
+    (404, "couldn't find that record"),
+    (429, 'hourly request limit'),
+    (500, 'returned an error'),
+    (400, 'returned an error'),
+])
+def test_user_message(status, text):
+    assert text in drchrono.user_message(DrChronoError('x', status))
+
+
 # ── get / get_all ─────────────────────────────────────────────────────────────
 
 class TestGet:

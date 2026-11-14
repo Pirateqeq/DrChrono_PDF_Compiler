@@ -12,6 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.testing import fake_response, message_texts
+from core.drchrono import DrChronoError
 from verify.exceptions import DrChronoAuthError
 from verify.models import DrChronoCredential
 from verify.services import (
@@ -183,6 +184,25 @@ class TestRequireAuth:
 
         assert response.url == LOGIN_URL
         assert [str(m) for m in get_messages(request)] == ['Your DrChrono session expired, please sign in again.']
+
+    def test_token_rejected_inside_view_redirects_with_message(self, credential, make_request):
+        @require_auth
+        def view(request):
+            raise DrChronoError('rejected', 401)
+
+        request = make_request(credential.user)
+        response = view(request)
+
+        assert response.url == LOGIN_URL
+        assert [str(m) for m in get_messages(request)] == ['Your DrChrono session expired, please sign in again.']
+
+    def test_other_drchrono_errors_reach_the_view_caller(self, credential, make_request):
+        @require_auth
+        def view(request):
+            raise DrChronoError('down', 503)
+
+        with pytest.raises(DrChronoError):
+            view(make_request(credential.user))
 
     def test_usable_token_is_passed_to_view(self, credential, make_request):
         response = protected_view(make_request(credential.user))

@@ -25,6 +25,16 @@ def get(token, path, **params):
         raise DrChronoError(f'DrChrono request failed: {e}', getattr(e.response, 'status_code', None)) from e
 
 
+def user_message(error):
+    """Plain-English text for a DrChronoError. A 401 never gets here: require_auth sends the user to sign in."""
+    return {
+        None: "DrChrono isn't responding. Try again in a moment.",
+        403: "Your DrChrono account doesn't have permission to see this.",
+        404: "DrChrono couldn't find that record.",
+        429: "DrChrono's hourly request limit was reached. Try again after the top of the hour.",
+    }.get(error.status, 'DrChrono returned an error. Try again in a moment.')
+
+
 def get_all(token, path, **params):
     """Every result of a list endpoint, following DrChrono's `next` page links."""
     page = get(token, path, **params)
