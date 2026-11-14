@@ -1,0 +1,7 @@
+{% extends "layout.html" %}
+{% block title %}Sign In{% endblock %}
+{% block content %}
+    <h1 style="font-size: 32px; font-weight: 700; color: #134e4a; margin: 0 0 8px 0;">Sign In</h1>
+    <p style="font-size: 16px; color: #78716c; margin: 0 0 32px 0;">Use your DrChrono account to search patients and build billing PDFs.</p>
+    <a href="{% url 'verify_app:authorize' %}" style="display: inline-block; background: #0d9488; color: #fff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 12px 28px; border-radius: 24px;">Sign in with DrChrono</a>
+{% endblock %}

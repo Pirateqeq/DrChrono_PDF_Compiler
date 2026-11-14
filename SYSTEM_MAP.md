@@ -6,8 +6,8 @@ How the [DrChrono PDF Compiler](README.md) fits together: what the user does, wh
 
 | # | Page | User does | App does | User sees |
 |---|---|---|---|---|
-| 1 | `/` (`verify`) | Opens the site | Builds DrChrono sign-in link, stores OAuth `state` | DrChrono sign-in |
-| 2 | `/oauth/callback` (`verify`) | Signs in to DrChrono, allows access | Exchanges code for tokens, saves them to a passwordless local user | "Successfully connected as …", search page |
+| 1 | `/`, `/authorize/` (`verify`) | Opens the site, clicks **Sign in with DrChrono** | Shows the sign-in page (or goes to search if already signed in); saves a random `state` and redirects | DrChrono sign-in |
+| 2 | `/oauth/callback` (`verify`) | Signs in to DrChrono, allows access | Checks `state`, exchanges code for tokens, saves them to a passwordless local user | "Successfully connected as …", search page |
 | 3 | `/search/` (`search`) | Enters first name, last name and/or DOB, clicks **Search Patients** | Calls `/api/patients_summary`, stores results in session | "Found N matching patient(s)." |
 | 4 | `/search/results/` (`search`) | Clicks **Select & View Appointments** | Loads last 3 years of past, attended visits with a clinical note PDF | Patient cards (name, DOB, chart ID) |
 | 5 | `/appts/patient/<id>_<name>/historical/` (`appts`) | Unticks unwanted visits, clicks **Generate PDF Report for Selected** | — | Visits newest first, all ticked |
@@ -54,7 +54,7 @@ flowchart LR
     P --> CFG
 ```
 
-Every page after sign-in passes through `verify.require_auth`: it refreshes an expired token, or sends the user back to step 1.
+Every page after sign-in passes through `verify.require_auth`: it refreshes the token when less than 5 minutes are left, or sends the user back to the sign-in page.
 
 ## PDF generation (step 6)
 
@@ -65,7 +65,7 @@ sequenceDiagram
     participant DC as DrChrono
 
     User->>PDF: POST ticked appointment IDs
-    PDF->>DC: Refresh token if expired
+    PDF->>DC: Refresh token if under 5 minutes left
     Note over PDF,DC: Balance report (all eligible visits, last 3 years)
     PDF->>DC: GET /api/patients/{id}
     PDF->>DC: GET /api/appointments
@@ -120,9 +120,13 @@ HCFA-1500 box sources:
 
 | Situation | Message / result |
 |---|---|
-| Token expired | Refreshed silently |
-| Token can't be refreshed, or not signed in | Back to DrChrono sign-in |
-| CSRF failure (stale session) | "Your session has expired please relogin", then sign-in |
+| Token expiring | Refreshed silently |
+| Not signed in | Sign-in page |
+| Token can't be refreshed | Sign-in page: "Your DrChrono session expired, please sign in again." |
+| Cancel on DrChrono's screen | Sign-in page: "Sign-in was cancelled." |
+| Stale or forged sign-in return | Sign-in page: "Sign-in expired, please try again." |
+| DrChrono error during sign-in | Sign-in page: "Couldn't sign in to DrChrono, please try again." |
+| CSRF failure (stale session) | Sign-in page: "Your session has expired, please sign in again." |
 | Empty search form | "Please provide at least one of: First Name, Last Name, or Date Of Birth" |
 | No matches | "No patients found matching your criteria." |
 | DrChrono search error | "A client error / server error occurred while searching patients." |
