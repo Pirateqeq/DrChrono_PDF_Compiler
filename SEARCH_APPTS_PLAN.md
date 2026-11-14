@@ -163,17 +163,23 @@ Applies to every step:
    *Simplicity check:*
    - Read `search/views.py`, `search/services.py` and `appts/views.py` top to bottom once more; anything that needs a second read gets simplified.
 
-6. **Merge**: `/simplify` on the full diff, apply what it finds, PR to `main`. No Render changes.
+6. **Shorter sessions** (was optional extra 1): `SESSION_COOKIE_AGE = 12 * 60 * 60` in `settings.py`, so a forgotten sign-in, and the slim search results with it, expire within a clinic day instead of 2 weeks. Test: the setting, and that the session cookie's max-age matches.
+
+   *Simplicity check:*
+   - One setting line with a one-line *why* comment; no middleware or custom expiry code.
+
+7. **Merge**: `/simplify` on the full diff, apply what it finds, PR to `main`. No Render changes (staff sign in once a day).
 
 ## Done when
 
 - The "no visits selected" known-bug test passes; the other 2 known bugs (`pdf`) unchanged.
 - All other tests pass; every step's simplicity check holds.
 - No patient name in any URL, hidden field or query string.
+- Sessions expire after 12 hours.
 - Local manual check passes.
 
 ## Optional extras (not in scope until chosen)
 
-1. **Shorter sessions**: `SESSION_COOKIE_AGE` from 2 weeks to a clinic day (e.g. 12 hours), so slim search results and sign-ins don't linger on shared computers (`REDESIGN.md` Phase 2).
+1. ~~Shorter sessions~~ (now step 6).
 2. **"Show more" button**: follow `next` to load the next 50 matches instead of only the notice.
 3. **Search by chart ID**: add a chart ID field (DrChrono supports `chart_id`; the form doesn't offer it today).
