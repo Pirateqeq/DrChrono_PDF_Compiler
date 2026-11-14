@@ -41,6 +41,9 @@ if DEBUG:
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = not DEBUG
 SESSION_COOKIE_SECURE = not DEBUG
+# A clinic day, not Django's 2 weeks: forgotten sign-ins on shared computers (and the
+# patient search results kept in the session) expire overnight.
+SESSION_COOKIE_AGE = 12 * 60 * 60
 CSRF_COOKIE_SECURE = not DEBUG
 
 SECURE_HSTS_SECONDS = 31536000

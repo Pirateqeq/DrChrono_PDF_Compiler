@@ -20,6 +20,11 @@ def test_named_routes(name, kwargs, path):
     assert resolve(path.replace('%20', ' ')).view_name == name
 
 
+def test_sessions_last_a_clinic_day(auth_client):
+    auth_client.get(reverse('search_app:search'))
+    assert auth_client.session.get_expiry_age() == 12 * 60 * 60
+
+
 def test_system_check_passes():
     call_command('check')
 
