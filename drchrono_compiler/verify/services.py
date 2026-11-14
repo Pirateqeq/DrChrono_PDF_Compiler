@@ -14,8 +14,6 @@ from .exceptions import DrChronoAuthError
 from .models import DrChronoCredential
 
 DRCHRONO = 'https://app.drchrono.com'
-# The practice's own DrChrono address, where staff sign in and out of DrChrono itself.
-DRCHRONO_LOGOUT_URL = 'https://drkurokawa.drchrono.com/accounts/logout/'
 
 
 def authorize_url(state):
