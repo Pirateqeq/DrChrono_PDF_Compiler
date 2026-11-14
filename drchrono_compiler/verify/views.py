@@ -6,6 +6,7 @@ from django.contrib.auth import login
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from django.shortcuts import redirect, render
+from django.views.decorators.http import require_POST
 
 from . import services
 from .exceptions import DrChronoAuthError
@@ -46,6 +47,14 @@ def oauth_callback(request):
     login(request, user)
     messages.success(request, f'Successfully connected as {username}')
     return redirect('search_app:search')
+
+
+@require_POST
+def sign_out(request):
+    """Log out of this app only; the user's DrChrono session is left alone."""
+    services.sign_out(request)
+    messages.success(request, "You're signed out.")
+    return redirect('verify_app:connect_drchrono')
 
 
 def csrf_failure(request, reason=''):

@@ -12,6 +12,7 @@ How the [DrChrono PDF Compiler](README.md) fits together: what the user does, wh
 | 4 | `/search/results/` (`search`) | Clicks **Select & View Appointments** | Loads last 3 years of past, attended visits with a clinical note PDF | Patient cards (name, DOB, chart ID) |
 | 5 | `/appts/patient/<id>_<name>/historical/` (`appts`) | Unticks unwanted visits, clicks **Generate PDF Report for Selected** | — | Visits newest first, all ticked |
 | 6 | `POST /pdf/patient/<id>/generate-selected/` (`pdf`) | Waits | Fetches data, draws forms, merges | Download `Patient_<First>_<Last>_REPORT.pdf`, or back to step 5 with errors |
+| 7 | `POST /logout/` (`verify`) | Clicks **Log out** in the navbar | Revokes the app's DrChrono access, deletes stored tokens, ends the session (DrChrono itself stays signed in) | Sign-in page: "You're signed out." |
 
 ## Components
 

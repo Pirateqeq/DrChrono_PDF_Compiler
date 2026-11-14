@@ -35,6 +35,10 @@
         <span style="width: 18px; height: 18px; border-radius: 50%; background: #0d9488; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px;">✓</span>
         Connected
       </div>
+      <form method="post" action="{% url 'verify_app:sign_out' %}" style="margin: 0;">
+        {% csrf_token %}
+        <button type="submit" style="background: none; border: 1px solid #e7e5e4; border-radius: 24px; padding: 6px 16px; color: #78716c; font-size: 14px; cursor: pointer;">Log out</button>
+      </form>
       {% else %}
       <div style="color: #a8a29e; font-size: 15px;">Not connected</div>
       {% endif %}

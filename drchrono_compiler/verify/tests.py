@@ -331,6 +331,50 @@ class TestOAuthCallback:
         assert not User.objects.exists()
 
 
+class TestSignOut:
+    def test_revokes_deletes_tokens_and_ends_session(self, auth_client, credential, drchrono_http):
+        response = auth_client.post(reverse('verify_app:sign_out'))
+
+        assert response.url == LOGIN_URL
+        assert "You're signed out." in message_texts(response)
+        assert drchrono_http.call_args.args == ('POST', 'https://app.drchrono.com/o/revoke_token/')
+        assert drchrono_http.call_args.kwargs['data'] == {
+            'token': 'valid-refresh-token', 'client_id': 'test-client-id', 'client_secret': 'test-client-secret',
+        }
+        assert not DrChronoCredential.objects.exists()
+        assert '_auth_user_id' not in auth_client.session
+        assert auth_client.get(SEARCH_URL).url == LOGIN_URL
+
+    @pytest.mark.parametrize('failure', [fake_response({}, status=500), requests.ConnectionError('down')])
+    def test_still_signs_out_when_revoke_fails(self, failure, auth_client, credential, drchrono_http):
+        drchrono_http.side_effect = [failure]
+
+        auth_client.post(reverse('verify_app:sign_out'))
+
+        assert not DrChronoCredential.objects.exists()
+        assert '_auth_user_id' not in auth_client.session
+
+    def test_already_signed_out_user(self, client, db, drchrono_http):
+        response = client.post(reverse('verify_app:sign_out'))
+
+        assert response.url == LOGIN_URL
+        drchrono_http.assert_not_called()
+
+    def test_sign_in_page_shows_signed_out_message(self, auth_client, credential, drchrono_http):
+        response = auth_client.post(reverse('verify_app:sign_out'), follow=True)
+
+        assert b"You&#x27;re signed out." in response.content
+        assert b'Sign in with DrChrono' in response.content
+
+    def test_get_not_allowed(self, auth_client):
+        assert auth_client.get(reverse('verify_app:sign_out')).status_code == 405
+
+    def test_button_shown_only_when_signed_in(self, client, auth_client, db):
+        button = f'action="{reverse("verify_app:sign_out")}"'
+        assert button in auth_client.get(SEARCH_URL).content.decode()
+        assert button not in client.get(LOGIN_URL).content.decode()
+
+
 class TestCsrfFailure:
     def test_redirects_to_sign_in_with_message(self, credential):
         client = Client(enforce_csrf_checks=True)
