@@ -1,12 +1,7 @@
 from django import forms
 
 class PatientSearchForm(forms.Form):
-    """
-    Form for searching patients via API call
-    - Last name is required
-    - First name is optional
-    - DOB is optional
-    """
+    """Patient search: first name, last name and/or date of birth; at least one is required."""
 
     first_name = forms.CharField(
         max_length=100,
@@ -40,13 +35,6 @@ class PatientSearchForm(forms.Form):
     
     def clean(self):
         cleaned_data = super().clean()
-        first = cleaned_data.get('first_name', '').strip()
-        last = cleaned_data.get('last_name', '').strip()
-        dob = cleaned_data.get('date_of_birth')
-
-        if not (first or last or dob):
-            raise forms.ValidationError(
-                'Please provide at least one of: First Name, Last Name, or Date Of Birth'
-            )
-        
+        if not any(cleaned_data.get(field) for field in ('first_name', 'last_name', 'date_of_birth')):
+            raise forms.ValidationError('Please provide at least one of: First Name, Last Name, or Date Of Birth')
         return cleaned_data

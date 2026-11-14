@@ -3,19 +3,19 @@
 {% block content %}
     <h1 style="font-size: 32px; font-weight: 700; color: #134e4a; margin: 0 0 8px 0;">Search Results</h1>
 
-    {% if result_count > 0 %}
+    {% if patients %}
       <p style="font-size: 16px; color: #78716c; margin: 0 0 32px 0;">
-        Found <strong style="color: #134e4a;">{{ result_count }}</strong> patient{{ result_count|pluralize }} matching:
+        Found <strong style="color: #134e4a;">{{ patients|length }}</strong> patient{{ patients|length|pluralize }} matching:
         <em>
-          {% if filters.last_name %}"{{ filters.last_name|title }}"{% endif %}
-          {% if filters.first_name %} ({{ filters.first_name|title }}){% endif %}
-          {% if filters.date_of_birth %} — DOB: {{ filters.date_of_birth }}{% endif %}
+          {% if query.last_name %}"{{ query.last_name|title }}"{% endif %}
+          {% if query.first_name %} ({{ query.first_name|title }}){% endif %}
+          {% if query.date_of_birth %} — DOB: {{ query.date_of_birth }}{% endif %}
         </em>
       </p>
 
-      {% if result_count > 30 %}
+      {% if more %}
         <div class="alert alert-warning" style="max-width: 760px;">
-          Many results returned. Consider adding more details for better accuracy.
+          DrChrono found more than 50 matches. Add details to narrow the search.
         </div>
       {% endif %}
 
