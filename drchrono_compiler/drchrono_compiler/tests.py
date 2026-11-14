@@ -9,8 +9,7 @@ ROUTES = [
     ('verify_app:oauth_callback', {}, '/oauth/callback'),
     ('search_app:search', {}, '/search/'),
     ('search_app:results', {}, '/search/results/'),
-    ('appts_app:historical_list', {'patient_id': 101, 'patient_name': 'Jane Doe'},
-     '/appts/patient/101_Jane%20Doe/historical/'),
+    ('appts_app:historical_list', {'patient_id': 101}, '/appts/patient/101/'),
     ('pdf_app:generate_selected', {'patient_id': 101}, '/pdf/patient/101/generate-selected/'),
 ]
 

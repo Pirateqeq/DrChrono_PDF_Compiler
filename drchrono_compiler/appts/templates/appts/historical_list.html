@@ -1,14 +1,13 @@
 {% extends "layout.html" %}
 {% block title %}Past Appointments{% endblock %}
 {% block content %}
-    <h1 style="font-size: 32px; font-weight: 700; color: #134e4a; margin: 0 0 8px 0;">Past Appointments for {{ patient_name }}</h1>
+    <h1 style="font-size: 32px; font-weight: 700; color: #134e4a; margin: 0 0 8px 0;">Past Appointments{% if patient %} for {{ patient.first_name }} {{ patient.last_name }}{% endif %}</h1>
 
     {% if appointments %}
     <p style="font-size: 16px; color: #78716c; margin: 0 0 32px 0;">Showing <strong style="color: #134e4a;">{{ appointments|length }}</strong> past appointment{{ appointments|length|pluralize }}.</p>
 
-    <form method="post" action="{% url 'pdf_app:generate_selected' patient_id=patient_id %}?patient_name={{ patient_name }}">
+    <form method="post" action="{% url 'pdf_app:generate_selected' patient_id=patient_id %}">
       {% csrf_token %}
-      <input type="hidden" name="patient_name" value="{{ patient_name }}">
       <div style="max-width: 800px; display: flex; flex-direction: column; gap: 12px;">
         {% for appt in appointments %}
         <div style="display: flex; align-items: center; gap: 16px; padding: 16px 20px; border: 1px solid #eee3d3; border-radius: 12px; background: #fff;">

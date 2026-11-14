@@ -27,7 +27,7 @@
             <div style="font-size: 16px; font-weight: 600; color: #134e4a;">{{ patient.last_name|title }}, {{ patient.first_name|title }}</div>
             <div style="font-size: 13px; color: #78716c; margin-top: 2px;">DOB {{ patient.date_of_birth|default:"—" }} · {{ patient.chart_id|default:"—" }}</div>
           </div>
-          <a href="{% url 'appts_app:historical_list' patient_id=patient.id patient_name=patient.first_name|add:' '|add:patient.last_name %}" style="background: #0d9488; color: #fff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 22px; border-radius: 24px;">Select &amp; View Appointments</a>
+          <a href="{% url 'appts_app:historical_list' patient_id=patient.id %}" style="background: #0d9488; color: #fff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 22px; border-radius: 24px;">Select &amp; View Appointments</a>
         </div>
         {% endfor %}
       </div>
