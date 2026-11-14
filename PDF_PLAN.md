@@ -13,6 +13,7 @@ Rewrite of the `pdf` app, which builds the billing PDF: the balance report, then
   Rejected: the full `REDESIGN.md` §3 structure (B, about 9 modules of mostly handover code) and fixing in place (C, keeps the 250-line drawing function).
 - **When one visit's part fails, skip it and list it.** The PDF still downloads, with a first page titled **"Not included"** listing each skipped piece and why. Problems that block *every* claim (missing patient or practice details) still stop the PDF with a plain message.
 - **More than 6 charges on a visit:** print **extra claim forms** for that visit, 6 charges per form, each with its own total.
+- **Reuse connections:** `core.drchrono` and the note downloads go through one `requests.Session` per worker process, so each request after the first skips the new-connection setup (about 0.1–0.4 s per request measured). Gunicorn's default sync workers handle one request at a time, so one shared session per process is safe.
 
 ## DrChrono facts this relies on
 
@@ -61,7 +62,17 @@ Rewrite of the `pdf` app, which builds the billing PDF: the balance report, then
 3. **Check details every claim needs** with `hcfa.missing_details(patient)`: name, date of birth, address, city, state, zip, and the `PROVIDER_*` settings. If any are missing, raise `PacketError` listing them in plain words ("Can't build claim forms: missing patient zip code, city.").
 4. Return a dict: `patient`, `appointments` (all eligible, for the balance report), `selected` (oldest first, by `scheduled_time`), `line_items` (by visit ID).
 
-**About 3 DrChrono calls** (plus one per extra page), against about 33 today. Clinical-note downloads are extra, one per selected visit.
+**About 3 DrChrono calls** (plus one per extra page), against about 33 today. Clinical-note downloads are extra, one per selected visit, and reuse one connection.
+
+Estimated time, at 0.3–1.0 s per request:
+
+| Patient | Today | After |
+|---|---|---|
+| 20 visits, 5 ticked | 11–38 s | 2–8 s |
+| 60 visits, 20 ticked | 38–125 s (over gunicorn's 30 s limit) | 8–25 s |
+| 60 visits, 40 ticked | 55–185 s | 14–45 s, less with connection reuse |
+
+The app's own PDF work (drawing and merging) measured 0.1–0.75 s; the network is almost all the time.
 
 ### `packet.build(packet) -> bytes`
 
@@ -138,7 +149,8 @@ Applies to every step:
    - The golden balance-report test passes unchanged.
    - `balance.py` ≤ 80 lines; no DrChrono calls.
 
-4. **`packet.py` + `views.py`**:
+4. **Connection reuse + `packet.py` + `views.py`**:
+   - `core.drchrono` sends through a module-level `requests.Session`; note downloads use it too; test patch targets move from `requests.get` to the session
    - fetch once, selection check, oldest-first order
    - per-piece skipping and the "Not included" page
    - plain error messages
